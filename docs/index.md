@@ -102,6 +102,12 @@ python -m pytest tests/test_components.py
 - [API仕様](api.html)
 - [FAQ](faq.html)
 
+## 📚 詳細ドキュメント
+
+- [📋 パラメータガイド](parameters.md) - 各パラメータの詳細設定
+- [📊 レポート形式説明](reports.md) - 生成されるレポートの読み方
+- [❓ よくある質問（FAQ）](faq.md) - トラブルシューティングとベストプラクティス
+
 ## 📞 サポート
 
 - [GitHub Issues](https://github.com/tradermonty/earnings-trade-backtest/issues)
