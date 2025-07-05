@@ -165,12 +165,16 @@ config.json
 # Reports and outputs
 reports/
 output/
-*.html
+reports/*.html
 *.png
 *.jpg
 *.jpeg
 *.gif
 *.pdf
+
+# Allow GitHub Pages files
+!index.html
+!docs/*.html
 
 # Articles and documentation
 articles/

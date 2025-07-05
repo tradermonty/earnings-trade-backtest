@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Earnings Swing Trading Strategy Backtest</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #34495e;
+            margin-top: 30px;
+        }
+        .language-toggle {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .language-toggle button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 0 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .language-toggle button:hover {
+            background: #2980b9;
+        }
+        .language-toggle button.active {
+            background: #2c3e50;
+        }
+        .github-buttons {
+            text-align: center;
+            margin: 30px 0;
+        }
+        .github-buttons a {
+            background: #24292e;
+            color: white;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 6px;
+            margin: 0 10px;
+            display: inline-block;
+            font-weight: 500;
+        }
+        .github-buttons a:hover {
+            background: #586069;
+        }
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        .feature-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
+        }
+        .feature-card h3 {
+            color: #2c3e50;
+            margin-top: 0;
+        }
+        .code-block {
+            background: #f1f3f4;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+            overflow-x: auto;
+        }
+        .content-section {
+            display: none;
+        }
+        .content-section.active {
+            display: block;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            background: #e74c3c;
+            color: white;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .badge.green {
+            background: #27ae60;
+        }
+        .badge.blue {
+            background: #3498db;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="language-toggle">
+            <button onclick="showLanguage('ja')" id="ja-btn" class="active">日本語</button>
+            <button onclick="showLanguage('en')" id="en-btn">English</button>
+        </div>
+
+        <!-- 日本語コンテンツ -->
+        <div id="ja-content" class="content-section active">
+            <h1>🚀 決算スイングトレード戦略バックテスト</h1>
+            
+            <div class="github-buttons">
+                <a href="https://github.com/your-username/earnings-trade-backtest">GitHub リポジトリ</a>
+                <a href="https://github.com/your-username/earnings-trade-backtest/releases">ダウンロード</a>
+            </div>
+
+            <p>
+                <span class="badge green">Python 3.11+</span>
+                <span class="badge blue">EODHD API</span>
+                <span class="badge">Mid/Small Cap</span>
+            </p>
+
+            <p>EODHD APIを使用したリアルタイムデータによる、中小型株に特化した決算ベーススイングトレード戦略の包括的なバックテストシステムです。</p>
+
+            <h2>🎯 主要機能</h2>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h3>📊 高度な分析エンジン</h3>
+                    <p>決算サプライズ、技術分析、リスク管理を統合した包括的な戦略分析</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🔍 柔軟なフィルタリング</h3>
+                    <p>時価総額、出来高、価格変動など多様な条件でのスクリーニング</p>
+                </div>
+                <div class="feature-card">
+                    <h3>📈 詳細なレポート</h3>
+                    <p>HTML形式の美しいレポートとCSVデータの両方を生成</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🛡️ リスク管理</h3>
+                    <p>ストップロス、ポジションサイズ、分散投資の自動制御</p>
+                </div>
+            </div>
+
+            <h2>🚀 クイックスタート</h2>
+            <div class="code-block">
+# リポジトリをクローン
+git clone https://github.com/your-username/earnings-trade-backtest.git
+cd earnings-trade-backtest
+
+# 仮想環境を作成・有効化
+python3.11 -m venv venv
+source venv/bin/activate
+
+# 依存関係をインストール
+pip install -r requirements.txt
+
+# 基本実行
+python earnings_backtest.py
+            </div>
+
+            <h2>💡 使用例</h2>
+            <div class="code-block">
+# 過去6ヶ月のバックテスト
+python earnings_backtest.py --start_date 2024-01-01 --end_date 2024-06-30
+
+# 保守的な設定
+python earnings_backtest.py --stop_loss 4 --position_size 4 --sp500_only
+
+# アグレッシブな設定
+python earnings_backtest.py --stop_loss 8 --position_size 8 --no_mid_small_only
+            </div>
+
+            <h2>📋 戦略概要</h2>
+            <ul>
+                <li><strong>エントリー条件:</strong> 決算サプライズ≥5%、ギャップアップ≥0%</li>
+                <li><strong>リスク管理:</strong> 6%ストップロス、21日移動平均トレーリング</li>
+                <li><strong>ポジション管理:</strong> 資金の6%、最大10ポジション</li>
+                <li><strong>対象銘柄:</strong> 中小型株（時価総額$300M-$10B）</li>
+            </ul>
+        </div>
+
+        <!-- 英語コンテンツ -->
+        <div id="en-content" class="content-section">
+            <h1>🚀 Earnings Swing Trading Strategy Backtest</h1>
+            
+            <div class="github-buttons">
+                <a href="https://github.com/your-username/earnings-trade-backtest">GitHub Repository</a>
+                <a href="https://github.com/your-username/earnings-trade-backtest/releases">Download</a>
+            </div>
+
+            <p>
+                <span class="badge green">Python 3.11+</span>
+                <span class="badge blue">EODHD API</span>
+                <span class="badge">Mid/Small Cap</span>
+            </p>
+
+            <p>A comprehensive backtesting system for earnings-based swing trading strategies, specialized for mid and small-cap stocks using real-time data from EODHD API.</p>
+
+            <h2>🎯 Key Features</h2>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h3>📊 Advanced Analysis Engine</h3>
+                    <p>Comprehensive strategy analysis integrating earnings surprises, technical analysis, and risk management</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🔍 Flexible Filtering</h3>
+                    <p>Screening with diverse conditions including market cap, volume, and price movements</p>
+                </div>
+                <div class="feature-card">
+                    <h3>📈 Detailed Reports</h3>
+                    <p>Generate beautiful HTML reports and CSV data exports</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🛡️ Risk Management</h3>
+                    <p>Automated control of stop-loss, position sizing, and portfolio diversification</p>
+                </div>
+            </div>
+
+            <h2>🚀 Quick Start</h2>
+            <div class="code-block">
+# Clone repository
+git clone https://github.com/your-username/earnings-trade-backtest.git
+cd earnings-trade-backtest
+
+# Create and activate virtual environment
+python3.11 -m venv venv
+source venv/bin/activate  # macOS/Linux
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Basic execution
+python earnings_backtest.py
+            </div>
+
+            <h2>💡 Usage Examples</h2>
+            <div class="code-block">
+# 6-month backtest
+python earnings_backtest.py --start_date 2024-01-01 --end_date 2024-06-30
+
+# Conservative setup
+python earnings_backtest.py --stop_loss 4 --position_size 4 --sp500_only
+
+# Aggressive setup
+python earnings_backtest.py --stop_loss 8 --position_size 8 --no_mid_small_only
+            </div>
+
+            <h2>📋 Strategy Overview</h2>
+            <ul>
+                <li><strong>Entry Conditions:</strong> Earnings surprise ≥5%, gap up ≥0%</li>
+                <li><strong>Risk Management:</strong> 6% stop-loss, 21-day MA trailing</li>
+                <li><strong>Position Management:</strong> 6% of capital, max 10 positions</li>
+                <li><strong>Target Stocks:</strong> Mid/small-cap ($300M-$10B market cap)</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        function showLanguage(lang) {
+            // Hide all content sections
+            document.querySelectorAll('.content-section').forEach(section => {
+                section.classList.remove('active');
+            });
+            
+            // Remove active class from all buttons
+            document.querySelectorAll('.language-toggle button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected language content
+            document.getElementById(lang + '-content').classList.add('active');
+            document.getElementById(lang + '-btn').classList.add('active');
+        }
+    </script>
+</body>
+</html> 

@@ -1,0 +1,44 @@
+title: "Earnings Swing Trading Strategy Backtest"
+description: "A comprehensive backtesting system for earnings-based swing trading strategies"
+url: "https://your-username.github.io"
+baseurl: "/earnings-trade-backtest"
+
+# Build settings
+markdown: kramdown
+highlighter: rouge
+theme: minima
+
+# Plugin settings
+plugins:
+  - jekyll-feed
+  - jekyll-sitemap
+
+# Exclude from processing
+exclude:
+  - venv/
+  - __pycache__/
+  - *.pyc
+  - .pytest_cache/
+  - .DS_Store
+  - .env
+  - articles/
+  - logs/
+  - reports/
+
+# GitHub Pages specific settings
+github: [metadata]
+
+# Language settings
+lang: ja
+locale: ja_JP
+
+# SEO settings
+google_analytics: # Add your Google Analytics ID here if needed
+author: "Takuei Saotome"
+twitter:
+  username: # Add your Twitter username if needed
+
+# Social links
+social:
+  links:
+    - https://github.com/your-username 
