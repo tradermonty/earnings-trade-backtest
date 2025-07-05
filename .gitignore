@@ -172,9 +172,15 @@ output/
 *.gif
 *.pdf
 
+# Articles and documentation
+articles/
+
 # Logs
 logs/
 *.log
+
+# Test files (keep in repository)
+!tests/
 
 # Temporary files
 tmp/
