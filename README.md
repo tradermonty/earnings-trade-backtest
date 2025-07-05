@@ -63,6 +63,7 @@ earnings-trade-backtest/
 │   └── metrics_calculator.py         # Trading metrics calculation
 ├── tests/                            # Test suite
 ├── reports/                          # Generated analysis reports (after execution)
+├── docs/                             # Documentation and screenshots
 ├── earnings_backtest.py             # Legacy single-file implementation
 ├── main.py                          # Main entry point
 ├── README.md                        # This file
@@ -279,13 +280,21 @@ After backtest execution, the following files are automatically generated in the
 ```
 reports/
 ├── earnings_backtest_report_2025-01-01_2025-06-30.html     # Main report
-├── earnings_backtest_2025-01-01_2025-06-30.csv             # Trade data
-└── earnings_backtest_2025-01-01_2025-06-30_mid-small-only.csv  # Filtered data
+└── earnings_backtest_2025-01-01_2025-06-30.csv             # Trade data
 ```
 
 ### 1. Interactive HTML Report
 
-The main report (`.html`) includes beautiful dark-themed charts:
+The main report (`.html`) includes beautiful dark-themed charts and comprehensive analysis:
+
+![Performance Summary](docs/backtest-report-1.png)
+*Performance summary dashboard with key metrics*
+
+![Monthly Analysis](docs/backtest-report-2.png)
+*Monthly performance heatmap and sector analysis*
+
+![Detailed Charts](docs/backtest-report-3.png)
+*Detailed technical analysis and trade breakdown*
 
 #### 📈 Included Charts
 - **Equity Curve**: Time-series asset growth
@@ -459,8 +468,6 @@ This project is released under the MIT License.
 
 - [System Technical Documentation](CLAUDE.md)
 - [Japanese Documentation](README_ja.md)
-- [Analysis Article Templates](articles/)
-- [Quality Checklist](articles/blog_checklist.md)
 
 ---
 
