@@ -18,7 +18,7 @@ EODHD APIを使用したリアルタイムデータによる、中小型株に�
 
 ```bash
 # リポジトリをクローン
-git clone https://github.com/your-username/earnings-trade-backtest.git
+git clone https://github.com/tradermonty/earnings-trade-backtest.git
 cd earnings-trade-backtest
 
 # 仮想環境を作成・有効化
@@ -104,9 +104,9 @@ python -m pytest tests/test_components.py
 
 ## 📞 サポート
 
-- [GitHub Issues](https://github.com/your-username/earnings-trade-backtest/issues)
-- [プルリクエスト](https://github.com/your-username/earnings-trade-backtest/pulls)
+- [GitHub Issues](https://github.com/tradermonty/earnings-trade-backtest/issues)
+- [プルリクエスト](https://github.com/tradermonty/earnings-trade-backtest/pulls)
 
 ## 📄 ライセンス
 
-このプロジェクトは[MIT License](https://github.com/your-username/earnings-trade-backtest/blob/main/LICENSE)の下で公開されています。 
+このプロジェクトは[MIT License](https://github.com/tradermonty/earnings-trade-backtest/blob/main/LICENSE)の下で公開されています。 

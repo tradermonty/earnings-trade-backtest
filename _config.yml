@@ -1,6 +1,6 @@
 title: "Earnings Swing Trading Strategy Backtest"
 description: "A comprehensive backtesting system for earnings-based swing trading strategies"
-url: "https://your-username.github.io"
+url: "https://tradermonty.github.io"
 baseurl: "/earnings-trade-backtest"
 
 # Build settings
@@ -34,11 +34,11 @@ locale: ja_JP
 
 # SEO settings
 google_analytics: # Add your Google Analytics ID here if needed
-author: "Takuei Saotome"
+author: "Monty Trader"
 twitter:
-  username: # Add your Twitter username if needed
+  username: monty_investor
 
 # Social links
 social:
   links:
-    - https://github.com/your-username 
+    - https://github.com/tradermonty
