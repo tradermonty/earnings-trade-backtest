@@ -12,8 +12,12 @@ from datetime import datetime, timedelta
 import requests
 from tqdm import tqdm
 
-from .data_fetcher import DataFetcher
-from .config import ThemeConfig
+try:
+    from .data_fetcher import DataFetcher
+    from .config import ThemeConfig
+except ImportError:
+    from data_fetcher import DataFetcher
+    from config import ThemeConfig
 
 
 class AnalysisEngine:
@@ -105,6 +109,7 @@ class AnalysisEngine:
         df['industry'] = df['ticker'].map(lambda x: sectors.get(x, {}).get('industry', 'Unknown'))
         
         # EPS情報も追加
+        print("追加分析データ（pre_earnings_change、volume_ratio、MA比率）の計算中...")
         df = self._add_eps_info(df)
         
         return df
@@ -212,22 +217,32 @@ class AnalysisEngine:
                     )
                     
                     if stock_data is not None and len(stock_data) >= 2:
+                        # DataFrameのカラム名を確認
+                        open_col = 'open' if 'open' in stock_data.columns else 'Open'
+                        close_col = 'close' if 'close' in stock_data.columns else 'Close'
+                        
                         # エントリー日のオープン価格と前日のクローズ価格を取得
                         entry_date_str = trade['entry_date']
                         if entry_date_str in stock_data['date'].values:
                             entry_idx = stock_data[stock_data['date'] == entry_date_str].index[0]
                             if entry_idx > 0:
-                                entry_open = stock_data.iloc[entry_idx]['Open']
-                                prev_close = stock_data.iloc[entry_idx - 1]['Close']
-                                gap = ((entry_open - prev_close) / prev_close) * 100
-                                gap_data.append(gap)
+                                entry_open = stock_data.iloc[entry_idx][open_col]
+                                prev_close = stock_data.iloc[entry_idx - 1][close_col]
+                                
+                                if pd.notna(entry_open) and pd.notna(prev_close) and prev_close != 0:
+                                    gap = ((entry_open - prev_close) / prev_close) * 100
+                                    gap_data.append(gap)
+                                else:
+                                    gap_data.append(0.0)
                             else:
                                 gap_data.append(0.0)
                         else:
                             gap_data.append(0.0)
                     else:
                         gap_data.append(0.0)
-                except:
+                except Exception as e:
+                    # デバッグ用にエラーログを出力
+                    print(f"Error calculating gap for {trade['ticker']}: {str(e)}")
                     gap_data.append(0.0)
             
             df['gap'] = gap_data
@@ -246,13 +261,23 @@ class AnalysisEngine:
                 )
                 
                 if stock_data is not None and len(stock_data) >= 20:
+                    # DataFrameのカラム名を確認（小文字のclose）
+                    close_col = 'close' if 'close' in stock_data.columns else 'Close'
+                    
                     # 20日間の価格変化率を計算
-                    price_change = ((stock_data['Close'].iloc[-1] - stock_data['Close'].iloc[-20]) / 
-                                  stock_data['Close'].iloc[-20] * 100)
-                    pre_earnings_changes.append(price_change)
+                    latest_close = stock_data[close_col].iloc[-1]
+                    close_20_days_ago = stock_data[close_col].iloc[-20]
+                    
+                    if pd.notna(latest_close) and pd.notna(close_20_days_ago) and close_20_days_ago != 0:
+                        price_change = ((latest_close - close_20_days_ago) / close_20_days_ago) * 100
+                        pre_earnings_changes.append(price_change)
+                    else:
+                        pre_earnings_changes.append(0.0)  # 無効なデータの場合のデフォルト値
                 else:
-                    pre_earnings_changes.append(0.0)  # デフォルト値
-            except:
+                    pre_earnings_changes.append(0.0)  # データ不足の場合のデフォルト値
+            except Exception as e:
+                # デバッグ用にエラーログを出力
+                print(f"Error calculating pre-earnings change for {trade['ticker']}: {str(e)}")
                 pre_earnings_changes.append(0.0)  # エラー時のデフォルト値
         
         df['pre_earnings_change'] = pre_earnings_changes
@@ -271,16 +296,24 @@ class AnalysisEngine:
                 )
                 
                 if stock_data is not None and len(stock_data) >= 60:
+                    # DataFrameのカラム名を確認（小文字のvolume）
+                    volume_col = 'volume' if 'volume' in stock_data.columns else 'Volume'
+                    
                     # 直近20日と過去60日の平均出来高を計算
-                    recent_volume = stock_data['Volume'].tail(20).mean()
-                    historical_volume = stock_data['Volume'].tail(60).mean()
+                    recent_volume = stock_data[volume_col].tail(20).mean()
+                    historical_volume = stock_data[volume_col].tail(60).mean()
                     
                     # 出来高比率を計算（recent / historicalの比率）
-                    volume_ratio = recent_volume / historical_volume if historical_volume > 0 else 1.0
-                    volume_changes.append(volume_ratio)
+                    if pd.notna(recent_volume) and pd.notna(historical_volume) and historical_volume > 0:
+                        volume_ratio = recent_volume / historical_volume
+                        volume_changes.append(volume_ratio)
+                    else:
+                        volume_changes.append(1.0)  # 無効なデータの場合のデフォルト値
                 else:
-                    volume_changes.append(1.0)  # デフォルト値
-            except:
+                    volume_changes.append(1.0)  # データ不足の場合のデフォルト値
+            except Exception as e:
+                # デバッグ用にエラーログを出力
+                print(f"Error calculating volume ratio for {trade['ticker']}: {str(e)}")
                 volume_changes.append(1.0)  # エラー時のデフォルト値
         
         df['volume_ratio'] = volume_changes
@@ -299,19 +332,23 @@ class AnalysisEngine:
                 )
                 
                 if stock_data is not None and len(stock_data) >= 200:
-                    # DataFrameに変換してインデックスを設定
-                    stock_df = pd.DataFrame(stock_data)
-                    stock_df['date'] = pd.to_datetime(stock_df['date'])
-                    stock_df.set_index('date', inplace=True)
+                    # stock_dataは既にDataFrameなので、カラム名を確認
+                    close_col = 'close' if 'close' in stock_data.columns else 'Close'
+                    
+                    # DataFrameのコピーを作成してインデックスを設定
+                    stock_df = stock_data.copy()
+                    if 'date' not in stock_df.index.names:
+                        stock_df['date'] = pd.to_datetime(stock_df['date'])
+                        stock_df.set_index('date', inplace=True)
                     
                     # 移動平均を計算
-                    stock_df['MA200'] = stock_df['Close'].rolling(window=200).mean()
-                    stock_df['MA50'] = stock_df['Close'].rolling(window=50).mean()
+                    stock_df['MA200'] = stock_df[close_col].rolling(window=200).mean()
+                    stock_df['MA50'] = stock_df[close_col].rolling(window=50).mean()
                     
                     # エントリー日の価格と移動平均を取得
                     entry_date_dt = pd.to_datetime(trade['entry_date'])
                     if entry_date_dt in stock_df.index:
-                        latest_close = stock_df.loc[entry_date_dt, 'Close']
+                        latest_close = stock_df.loc[entry_date_dt, close_col]
                         latest_ma200 = stock_df.loc[entry_date_dt, 'MA200']
                         latest_ma50 = stock_df.loc[entry_date_dt, 'MA50']
                         
@@ -334,6 +371,8 @@ class AnalysisEngine:
                     ma200_ratios.append(1.0)
                     ma50_ratios.append(1.0)
             except Exception as e:
+                # デバッグ用にエラーログを出力
+                print(f"Error calculating MA ratios for {trade['ticker']}: {str(e)}")
                 ma200_ratios.append(1.0)
                 ma50_ratios.append(1.0)
         
@@ -942,12 +981,15 @@ class AnalysisEngine:
                                bins=[-float('inf'), 0, 2, 5, 10, float('inf')],
                                labels=['Negative', '0-2%', '2-5%', '5-10%', '10%+'])
         
-        gap_perf = df.groupby('gap_range').agg({
+        gap_perf = df.groupby('gap_range', observed=True).agg({
             'pnl_rate': ['mean', 'count'],
             'pnl': 'sum'
         }).round(2)
         
         gap_perf.columns = ['avg_return', 'trade_count', 'total_pnl']
+        
+        # 取引数が0のカテゴリを除外
+        gap_perf = gap_perf[gap_perf['trade_count'] > 0]
         
         # チャート作成
         colors = [self.theme['profit_color'] if x > 0 else self.theme['loss_color'] 
@@ -999,12 +1041,15 @@ class AnalysisEngine:
                                         bins=[-float('inf'), -20, -10, 0, 10, 20, float('inf')],
                                         labels=['<-20%', '-20~-10%', '-10~0%', '0~10%', '10~20%', '>20%'])
         
-        pre_perf = df.groupby('pre_earnings_range').agg({
+        pre_perf = df.groupby('pre_earnings_range', observed=True).agg({
             'pnl_rate': ['mean', 'count'],
             'pnl': 'sum'
         }).round(2)
         
         pre_perf.columns = ['avg_return', 'trade_count', 'total_pnl']
+        
+        # 取引数が0のカテゴリを除外
+        pre_perf = pre_perf[pre_perf['trade_count'] > 0]
         
         # チャート作成
         colors = [self.theme['profit_color'] if x > 0 else self.theme['loss_color'] 
@@ -1056,12 +1101,15 @@ class AnalysisEngine:
                                   bins=[0, 1.5, 2.0, 3.0, 4.0, float('inf')],
                                   labels=['1.0-1.5x', '1.5-2.0x', '2.0-3.0x', '3.0-4.0x', '4.0x+'])
         
-        vol_perf = df.groupby('volume_range').agg({
+        vol_perf = df.groupby('volume_range', observed=True).agg({
             'pnl_rate': ['mean', 'count'],
             'pnl': 'sum'
         }).round(2)
         
         vol_perf.columns = ['avg_return', 'trade_count', 'total_pnl']
+        
+        # 取引数が0のカテゴリを除外
+        vol_perf = vol_perf[vol_perf['trade_count'] > 0]
         
         # チャート作成
         colors = [self.theme['profit_color'] if x > 0 else self.theme['loss_color'] 
@@ -1113,12 +1161,15 @@ class AnalysisEngine:
                                  bins=[0, 0.9, 1.0, 1.1, 1.2, float('inf')],
                                  labels=['<90%', '90-100%', '100-110%', '110-120%', '>120%'])
         
-        ma200_perf = df.groupby('ma200_range').agg({
+        ma200_perf = df.groupby('ma200_range', observed=True).agg({
             'pnl_rate': ['mean', 'count'],
             'pnl': 'sum'
         }).round(2)
         
         ma200_perf.columns = ['avg_return', 'trade_count', 'total_pnl']
+        
+        # 取引数が0のカテゴリを除外
+        ma200_perf = ma200_perf[ma200_perf['trade_count'] > 0]
         
         # チャート作成
         colors = [self.theme['profit_color'] if x > 0 else self.theme['loss_color'] 
@@ -1170,12 +1221,15 @@ class AnalysisEngine:
                                 bins=[0, 0.95, 1.0, 1.05, 1.1, float('inf')],
                                 labels=['<95%', '95-100%', '100-105%', '105-110%', '>110%'])
         
-        ma50_perf = df.groupby('ma50_range').agg({
+        ma50_perf = df.groupby('ma50_range', observed=True).agg({
             'pnl_rate': ['mean', 'count'],
             'pnl': 'sum'
         }).round(2)
         
         ma50_perf.columns = ['avg_return', 'trade_count', 'total_pnl']
+        
+        # 取引数が0のカテゴリを除外
+        ma50_perf = ma50_perf[ma50_perf['trade_count'] > 0]
         
         # チャート作成
         colors = [self.theme['profit_color'] if x > 0 else self.theme['loss_color'] 

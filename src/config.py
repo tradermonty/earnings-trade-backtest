@@ -10,7 +10,7 @@ class BacktestConfig:
     stop_loss: float = 6
     trail_stop_ma: int = 21
     max_holding_days: int = 90
-    initial_capital: float = 10000
+    initial_capital: float = 100000
     position_size: float = 6
     slippage: float = 0.3
     risk_limit: float = 6
