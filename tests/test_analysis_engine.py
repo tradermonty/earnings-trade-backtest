@@ -170,10 +170,11 @@ class TestAnalysisEngine(unittest.TestCase):
         self.assertIsInstance(chart_html, str)
         self.assertIn('pre-earnings-performance-chart', chart_html)
         self.assertIn('Performance by Pre-Earnings Trend', chart_html)
-        # カテゴリの確認
+        # カテゴリの確認（HTMLエンコードされた文字列も考慮）
         self.assertIn('-20~-10%', chart_html)
         self.assertIn('0~10%', chart_html)
-        self.assertIn('>20%', chart_html)
+        # >20% は HTMLエンコードされて \\u003e20% になる
+        self.assertTrue('>20%' in chart_html or '\\u003e20%' in chart_html)
     
     def test_generate_analysis_charts_empty_df(self):
         """generate_analysis_charts メソッドのテスト（空のDataFrame）"""

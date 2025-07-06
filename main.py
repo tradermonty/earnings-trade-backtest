@@ -98,20 +98,37 @@ def main():
     
     # 設定の表示
     print("=== Earnings Trade Backtest (Refactored Version) ===")
-    print(f"期間: {args.start_date} から {args.end_date}")
-    print(f"初期資金: ${args.initial_capital:,.0f}")
-    print(f"ポジションサイズ: {args.position_size}%")
-    print(f"ストップロス: {args.stop_loss}%")
-    print(f"マージン倍率制限: {args.margin_ratio}倍")
     
-    if args.sp500_only:
-        print("対象: S&P 500銘柄のみ")
-    elif not args.no_mid_small_only:
-        print("対象: 中型・小型株 (S&P 400/600)")
+    if args.language == 'ja':
+        print(f"期間: {args.start_date} から {args.end_date}")
+        print(f"初期資金: ${args.initial_capital:,.0f}")
+        print(f"ポジションサイズ: {args.position_size}%")
+        print(f"ストップロス: {args.stop_loss}%")
+        print(f"マージン倍率制限: {args.margin_ratio}倍")
+        
+        if args.sp500_only:
+            print("対象: S&P 500銘柄のみ")
+        elif not args.no_mid_small_only:
+            print("対象: 中型・小型株 (S&P 400/600)")
+        else:
+            print("対象: 全ての銘柄")
+        
+        print(f"言語: 日本語")
     else:
-        print("対象: 全ての銘柄")
-    
-    print(f"言語: {args.language}")
+        print(f"Period: {args.start_date} to {args.end_date}")
+        print(f"Initial Capital: ${args.initial_capital:,.0f}")
+        print(f"Position Size: {args.position_size}%")
+        print(f"Stop Loss: {args.stop_loss}%")
+        print(f"Margin Ratio Limit: {args.margin_ratio}x")
+        
+        if args.sp500_only:
+            print("Target: S&P 500 stocks only")
+        elif not args.no_mid_small_only:
+            print("Target: Mid/Small-cap stocks (S&P 400/600)")
+        else:
+            print("Target: All stocks")
+        
+        print(f"Language: English")
     print("-" * 50)
     
     try:

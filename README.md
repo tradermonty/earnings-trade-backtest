@@ -40,13 +40,13 @@ EODHD_API_KEY=your_api_key_here
 
 ```bash
 # Run with default settings (past 1 month)
-python earnings_backtest.py
+python main.py
 
 # Run with specific date range
-python earnings_backtest.py --start_date 2025-01-01 --end_date 2025-06-30
+python main.py --start_date 2025-01-01 --end_date 2025-06-30
 
 # Display help
-python earnings_backtest.py --help
+python main.py --help
 ```
 
 ## 📁 Project Structure
@@ -58,14 +58,16 @@ earnings-trade-backtest/
 │   ├── data_filter.py                # Earnings and technical filters
 │   ├── trade_executor.py             # Trade execution simulation
 │   ├── risk_manager.py               # Risk management system
-│   ├── analysis_engine.py            # Performance analysis
-│   ├── report_generator.py           # HTML/CSV report generation
-│   └── metrics_calculator.py         # Trading metrics calculation
-├── tests/                            # Test suite
+│   ├── analysis_engine.py            # Advanced performance analysis
+│   ├── report_generator.py           # Enhanced HTML/CSV report generation
+│   ├── metrics_calculator.py         # Trading metrics calculation
+│   ├── config.py                     # Configuration management
+│   └── main.py                       # Modular main execution
+├── tests/                            # Comprehensive test suite
 ├── reports/                          # Generated analysis reports (after execution)
 ├── docs/                             # Documentation and screenshots
 ├── earnings_backtest.py             # Legacy single-file implementation
-├── main.py                          # Main entry point
+├── main.py                          # Main entry point (recommended)
 ├── README.md                        # This file
 ├── README_ja.md                     # Japanese documentation
 └── requirements.txt                 # Python dependencies
@@ -88,6 +90,7 @@ earnings-trade-backtest/
 
 ### 3. Risk Management
 - **Position Size**: 6% of capital per trade
+- **Margin Control**: Maximum 1.5x leverage (total positions vs capital)
 - **Concurrent Positions**: Maximum 10 positions
 - **Sector Diversification**: Max 30% per sector
 - **Daily Risk Limit**: Stop new trades if losses exceed 6%
@@ -114,6 +117,7 @@ earnings-trade-backtest/
 --trail_stop_ma 21          # Trailing stop MA period (default: 21 days)
 --max_holding_days 90       # Maximum holding period (default: 90 days)
 --risk_limit 6              # Risk management limit % (default: 6%)
+--margin_ratio 1.5          # Maximum position to capital ratio (default: 1.5x)
 
 # Trading costs
 --slippage 0.3              # Slippage % (default: 0.3%)
@@ -142,34 +146,37 @@ earnings-trade-backtest/
 
 #### 1. Conservative Setup (Risk-focused)
 ```bash
-python earnings_backtest.py \
+python main.py \
   --start_date 2025-01-01 \
   --end_date 2025-06-30 \
   --stop_loss 4 \
   --position_size 4 \
   --max_holding_days 60 \
+  --margin_ratio 1.2 \
   --sp500_only
 ```
 
 #### 2. Aggressive Setup (Return-focused)
 ```bash
-python earnings_backtest.py \
+python main.py \
   --start_date 2025-01-01 \
   --end_date 2025-06-30 \
   --stop_loss 8 \
   --position_size 8 \
   --max_holding_days 120 \
+  --margin_ratio 2.0 \
   --no_mid_small_only
 ```
 
 #### 3. Mid/Small-Cap Specialized Long-Term Strategy
 ```bash
-python earnings_backtest.py \
+python main.py \
   --start_date 2025-01-01 \
   --end_date 2025-06-30 \
   --stop_loss 6 \
   --trail_stop_ma 50 \
   --max_holding_days 180 \
+  --margin_ratio 1.5 \
   --pre_earnings_change -20
 ```
 
@@ -199,6 +206,7 @@ python earnings_backtest.py \
 | Parameter | Default | Description | Recommended Range | Notes |
 |-----------|---------|-------------|-------------------|-------|
 | `position_size` | 6% | Capital allocation per trade | 4-8% | Higher increases risk, lower reduces returns |
+| `margin_ratio` | 1.5 | Maximum position to capital ratio | 1.2-2.0 | Leverage control, prevents overexposure |
 | `slippage` | 0.3% | Trading cost (slippage) | 0.1-0.5% | Reflects realistic trading environment |
 | **Internal Fixed** | 10 stocks | Maximum concurrent positions | - | Prevents over-diversification |
 
@@ -343,23 +351,26 @@ holding_days    # Holding period
 ### 4. Sample Execution Output
 
 ```bash
-$ python earnings_backtest.py --start_date 2025-01-01 --end_date 2025-06-30
+$ python main.py --start_date 2025-01-01 --end_date 2025-06-30
 
-Fetching earnings data... ████████████████████████████████████████ 100%
-Fetching stock data... ████████████████████████████████████████ 100%
-Executing backtest... ████████████████████████████████████████ 100%
+=== Earnings Trade Backtest (Refactored Version) ===
+期間: 2025-01-01 から 2025-06-30
+初期資金: $100,000
+ポジションサイズ: 6%
+ストップロス: 6%
+マージン倍率制限: 1.5倍
+対象: 中型・小型株 (S&P 400/600)
 
-=== Backtest Results ===
-Period: 2025-01-01 to 2025-06-30
-Total trades: 45
-Win rate: 53.3%
-Total return: +12.4%
-Profit factor: 1.82
-Maximum drawdown: -8.2%
+1. 決算データの取得を開始...
+2. 第1段階フィルタリング: 決算サプライズ ≥ 5%
+3. 第2段階フィルタリング: 技術的条件
+4. バックテストの実行中...
+5. バックテスト完了
+6. 分析チャートを生成中...
+7. レポートを生成中...
 
-Reports generated:
-- reports/earnings_backtest_report_2025-01-01_2025-06-30.html
-- reports/earnings_backtest_2025-01-01_2025-06-30.csv
+HTMLレポートを生成しました: reports/earnings_backtest_report_2025-01-01_2025-06-30.html
+CSVレポートを生成しました: reports/earnings_backtest_2025-01-01_2025-06-30.csv
 ```
 
 ### 5. Troubleshooting
@@ -383,10 +394,10 @@ Reports generated:
 #### Performance Optimization
 ```bash
 # Fast execution (short-term analysis)
-python earnings_backtest.py --start_date 2025-06-01 --end_date 2025-06-30
+python main.py --start_date 2025-06-01 --end_date 2025-06-30
 
 # Detailed analysis (long-term, time-intensive)
-python earnings_backtest.py --start_date 2024-01-01 --end_date 2025-06-30
+python main.py --start_date 2024-01-01 --end_date 2025-06-30
 ```
 
 ## 📚 Theoretical Foundation
