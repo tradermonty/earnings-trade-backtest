@@ -158,7 +158,7 @@ def custom_indicator(self, data):
 **A:** 以下の方法を試す：
 ```bash
 # 処理期間を短縮
-python earnings_backtest.py --start_date 2024-01-01 --end_date 2024-06-30
+python main.py --start_date 2024-01-01 --end_date 2024-06-30
 
 # チャンクサイズを縮小
 # config.pyでCHUNK_SIZE = 500に設定
