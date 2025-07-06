@@ -1010,7 +1010,8 @@ class AnalysisEngine:
             ),
             paper_bgcolor=self.theme['bg_color'],
             plot_bgcolor=self.theme['plot_bg_color'],
-            font=dict(color=self.theme['text_color'])
+            font=dict(color=self.theme['text_color']),
+            height=600
         )
         
         return fig.to_html(include_plotlyjs='cdn', div_id="gap-performance-chart")
@@ -1070,7 +1071,8 @@ class AnalysisEngine:
             ),
             paper_bgcolor=self.theme['bg_color'],
             plot_bgcolor=self.theme['plot_bg_color'],
-            font=dict(color=self.theme['text_color'])
+            font=dict(color=self.theme['text_color']),
+            height=600
         )
         
         return fig.to_html(include_plotlyjs='cdn', div_id="pre-earnings-performance-chart")
@@ -1192,7 +1194,7 @@ class AnalysisEngine:
                 x=1,
                 font=dict(color=self.theme['text_color'])
             ),
-            height=500
+            height=600
         )
         
         return fig.to_html(include_plotlyjs='cdn', div_id="volume-trend-chart")
@@ -1252,7 +1254,8 @@ class AnalysisEngine:
             ),
             paper_bgcolor=self.theme['bg_color'],
             plot_bgcolor=self.theme['plot_bg_color'],
-            font=dict(color=self.theme['text_color'])
+            font=dict(color=self.theme['text_color']),
+            height=600
         )
         
         return fig.to_html(include_plotlyjs='cdn', div_id="ma200-analysis-chart")
@@ -1312,7 +1315,8 @@ class AnalysisEngine:
             ),
             paper_bgcolor=self.theme['bg_color'],
             plot_bgcolor=self.theme['plot_bg_color'],
-            font=dict(color=self.theme['text_color'])
+            font=dict(color=self.theme['text_color']),
+            height=600
         )
         
         return fig.to_html(include_plotlyjs='cdn', div_id="ma50-analysis-chart")
