@@ -22,7 +22,7 @@ class ReportGenerator:
         self.analysis_engine = AnalysisEngine(self.data_fetcher, self.theme)
     
     def generate_html_report(self, trades: List[Dict[str, Any]], metrics: Dict[str, Any],
-                           config: Dict[str, Any]) -> str:
+                           config: Dict[str, Any], daily_positions_data: Dict[str, Any] = None) -> str:
         """HTMLレポートを生成"""
         if not trades:
             print("トレードデータがないため、レポートを生成できません。")
@@ -43,8 +43,13 @@ class ReportGenerator:
         # 詳細分析チャートを生成
         analysis_charts = self.analysis_engine.generate_analysis_charts(df)
         
+        # 日次ポジションチャートを生成
+        position_chart = ""
+        if daily_positions_data:
+            position_chart = self._generate_position_chart(daily_positions_data)
+        
         # HTMLコンテンツを生成
-        html_content = self._generate_html_content(df, metrics, config, analysis_charts)
+        html_content = self._generate_html_content(df, metrics, config, analysis_charts, position_chart)
         
         # ファイルに書き込み
         with open(filename, 'w', encoding='utf-8') as f:
@@ -62,7 +67,8 @@ class ReportGenerator:
         return filename
     
     def _generate_html_content(self, df: pd.DataFrame, metrics: Dict[str, Any],
-                              config: Dict[str, Any], analysis_charts: Dict[str, str] = None) -> str:
+                              config: Dict[str, Any], analysis_charts: Dict[str, str] = None,
+                              position_chart: str = "") -> str:
         """HTMLコンテンツを生成"""
         # 資産曲線のグラフを生成
         equity_chart = self._create_equity_curve_chart(df, metrics)
@@ -248,6 +254,15 @@ class ReportGenerator:
             </div>
         </div>
 
+        {f'''
+        <div class="section">
+            <h2>Daily Position Tracking</h2>
+            <div class="chart-container">
+                {position_chart}
+            </div>
+        </div>
+        ''' if position_chart else ""}
+
         {analysis_sections}
 
         <div class="section">
@@ -389,11 +404,77 @@ class ReportGenerator:
         </div>
             """)
         
+        # 業界パフォーマンス分析（Top 15）
+        if 'industry_performance' in analysis_charts:
+            sections.append(f"""
+        <div class="section">
+            <h3>Industry Performance (Top 15)</h3>
+            <div class="chart-container">
+                {analysis_charts['industry_performance']}
+            </div>
+        </div>
+            """)
+        
+        # ギャップサイズ別パフォーマンス分析
+        if 'gap_performance' in analysis_charts:
+            sections.append(f"""
+        <div class="section">
+            <h3>Performance by Gap Size</h3>
+            <div class="chart-container">
+                {analysis_charts['gap_performance']}
+            </div>
+        </div>
+            """)
+        
+        # 決算前トレンド別パフォーマンス分析
+        if 'pre_earnings_performance' in analysis_charts:
+            sections.append(f"""
+        <div class="section">
+            <h3>Performance by Pre-Earnings Trend</h3>
+            <div class="chart-container">
+                {analysis_charts['pre_earnings_performance']}
+            </div>
+        </div>
+            """)
+        
+        # 出来高トレンド分析
+        if 'volume_trend' in analysis_charts:
+            sections.append(f"""
+        <div class="section">
+            <h3>Volume Trend Analysis</h3>
+            <div class="chart-container">
+                {analysis_charts['volume_trend']}
+            </div>
+        </div>
+            """)
+        
+        # MA200分析
+        if 'ma200_analysis' in analysis_charts:
+            sections.append(f"""
+        <div class="section">
+            <h3>MA200 Analysis</h3>
+            <div class="chart-container">
+                {analysis_charts['ma200_analysis']}
+            </div>
+        </div>
+            """)
+        
+        # MA50分析
+        if 'ma50_analysis' in analysis_charts:
+            sections.append(f"""
+        <div class="section">
+            <h3>MA50 Analysis</h3>
+            <div class="chart-container">
+                {analysis_charts['ma50_analysis']}
+            </div>
+        </div>
+            """)
+        
         # EPSサプライズ分析
         if 'eps_surprise' in analysis_charts:
             sections.append(f"""
         <div class="section">
-            <h3>EPS Surprise Analysis</h3>
+            <h3>EPS Surprise Performance</h3>
             <div class="chart-container">
                 {analysis_charts['eps_surprise']}
             </div>
@@ -628,6 +709,87 @@ class ReportGenerator:
         )
         
         return fig.to_html(include_plotlyjs='cdn', div_id="return-distribution-chart")
+    
+    def _generate_position_chart(self, daily_positions_data: Dict[str, Any]) -> str:
+        """日次ポジション総額チャートを生成"""
+        daily_positions = daily_positions_data.get('daily_positions', {})
+        
+        if not daily_positions:
+            return ""
+        
+        # データをソート
+        sorted_dates = sorted(daily_positions.keys())
+        dates = [datetime.strptime(date, '%Y-%m-%d') for date in sorted_dates]
+        total_values = [daily_positions[date]['total_value'] for date in sorted_dates]
+        num_positions = [daily_positions[date]['num_positions'] for date in sorted_dates]
+        
+        # メインチャートの作成
+        fig = go.Figure()
+        
+        # ポジション総額
+        fig.add_trace(go.Scatter(
+            x=dates,
+            y=total_values,
+            mode='lines+markers',
+            name='Total Position Value',
+            line=dict(color=self.theme['line_color'], width=2),
+            marker=dict(size=4),
+            hovertemplate='Date: %{x}<br>Position Value: $%{y:,.0f}<extra></extra>'
+        ))
+        
+        # ポジション数（右軸）
+        fig.add_trace(go.Scatter(
+            x=dates,
+            y=num_positions,
+            mode='lines+markers',
+            name='Number of Positions',
+            line=dict(color=self.theme['profit_color'], width=2, dash='dash'),
+            marker=dict(size=4),
+            yaxis='y2',
+            hovertemplate='Date: %{x}<br>Positions: %{y}<extra></extra>'
+        ))
+        
+        # レイアウト設定
+        fig.update_layout(
+            title=dict(
+                text='Daily Position Tracking',
+                font=dict(color=self.theme['text_color'], size=18)
+            ),
+            xaxis=dict(
+                title=dict(text='Date', font=dict(color=self.theme['text_color'])),
+                gridcolor='rgba(255, 255, 255, 0.1)',
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                showgrid=True
+            ),
+            yaxis=dict(
+                title=dict(text='Position Value ($)', font=dict(color=self.theme['text_color'])),
+                gridcolor='rgba(255, 255, 255, 0.1)',
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                side='left',
+                showgrid=True
+            ),
+            yaxis2=dict(
+                title=dict(text='Number of Positions', font=dict(color=self.theme['text_color'])),
+                overlaying='y',
+                side='right',
+                tickfont=dict(color=self.theme['text_color']),
+                showgrid=False
+            ),
+            plot_bgcolor=self.theme['plot_bg_color'],
+            paper_bgcolor=self.theme['bg_color'],
+            font=dict(color=self.theme['text_color']),
+            showlegend=True,
+            legend=dict(font=dict(color=self.theme['text_color'])),
+            template=None  # テンプレートを無効化
+        )
+        
+        # 最終的にグリッド色を強制的に適用
+        fig.update_xaxes(gridcolor='rgba(255, 255, 255, 0.1)', showgrid=True)
+        fig.update_yaxes(gridcolor='rgba(255, 255, 255, 0.1)', showgrid=True)
+        
+        return fig.to_html(include_plotlyjs='cdn', div_id="position-chart", config={'responsive': True})
     
     def _create_performance_summary(self, metrics: Dict[str, Any]) -> str:
         """パフォーマンス要約を生成"""

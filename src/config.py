@@ -19,6 +19,7 @@ class BacktestConfig:
     mid_small_only: bool = False
     language: str = 'en'
     pre_earnings_change: float = -10
+    margin_ratio: float = 1.5
     target_symbols: Optional[Set[str]] = None
 
 

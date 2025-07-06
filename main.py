@@ -48,6 +48,8 @@ def parse_arguments():
                         help='Risk limit percentage for stopping new trades')
     parser.add_argument('--pre_earnings_change', type=float, default=0.0,
                         help='Minimum price change percentage 20 days before earnings')
+    parser.add_argument('--margin_ratio', type=float, default=1.5,
+                        help='Maximum position to capital ratio (default: 1.5x leverage)')
     
     # トレード設定
     parser.add_argument('--no_partial_profit', action='store_true',
@@ -100,6 +102,7 @@ def main():
     print(f"初期資金: ${args.initial_capital:,.0f}")
     print(f"ポジションサイズ: {args.position_size}%")
     print(f"ストップロス: {args.stop_loss}%")
+    print(f"マージン倍率制限: {args.margin_ratio}倍")
     
     if args.sp500_only:
         print("対象: S&P 500銘柄のみ")

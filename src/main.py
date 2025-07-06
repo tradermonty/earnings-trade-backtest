@@ -66,7 +66,8 @@ class EarningsBacktest:
             trail_stop_ma=self.config.trail_stop_ma,
             max_holding_days=self.config.max_holding_days,
             slippage=self.config.slippage,
-            partial_profit=self.config.partial_profit
+            partial_profit=self.config.partial_profit,
+            margin_ratio=self.config.margin_ratio
         )
         
         # メトリクス計算コンポーネント
@@ -177,7 +178,8 @@ class EarningsBacktest:
             'sp500_only': self.config.sp500_only,
             'mid_small_only': self.config.mid_small_only,
             'language': self.config.language,
-            'pre_earnings_change': self.config.pre_earnings_change
+            'pre_earnings_change': self.config.pre_earnings_change,
+            'margin_ratio': self.config.margin_ratio
         }
     
     def _generate_reports(self):
@@ -188,11 +190,15 @@ class EarningsBacktest:
         
         print("\n7. レポートを生成中...")
         
+        # 日次ポジションデータを取得
+        daily_positions_data = self.trade_executor.get_daily_positions_data()
+        
         # HTMLレポートの生成
         html_file = self.report_generator.generate_html_report(
             self.trades, 
             self.metrics, 
-            self._get_config_dict()
+            self._get_config_dict(),
+            daily_positions_data
         )
         
         # CSVレポートの生成
@@ -243,7 +249,8 @@ def create_backtest_from_args(args) -> EarningsBacktest:
         sp500_only=args.sp500_only,
         mid_small_only=not args.no_mid_small_only if not args.sp500_only else False,
         language=args.language,
-        pre_earnings_change=args.pre_earnings_change
+        pre_earnings_change=args.pre_earnings_change,
+        margin_ratio=args.margin_ratio
     )
     
     return EarningsBacktest(config)

@@ -8,7 +8,7 @@ import plotly.graph_objs as go
 from plotly.offline import plot
 from typing import List, Dict, Any, Optional
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 from tqdm import tqdm
 
@@ -55,6 +55,30 @@ class AnalysisEngine:
         eps_acceleration_chart = self._create_eps_acceleration_chart(trades_with_sector)
         analysis_charts['eps_acceleration'] = eps_acceleration_chart
         
+        # 6. 業界パフォーマンス分析（Top 15）
+        industry_chart = self._create_industry_performance_chart(trades_with_sector)
+        analysis_charts['industry_performance'] = industry_chart
+        
+        # 7. ギャップサイズ別パフォーマンス分析
+        gap_performance_chart = self._create_gap_performance_chart(trades_with_sector)
+        analysis_charts['gap_performance'] = gap_performance_chart
+        
+        # 8. 決算前トレンド別パフォーマンス分析
+        pre_earnings_chart = self._create_pre_earnings_performance_chart(trades_with_sector)
+        analysis_charts['pre_earnings_performance'] = pre_earnings_chart
+        
+        # 9. 出来高トレンド分析
+        volume_chart = self._create_volume_trend_chart(trades_with_sector)
+        analysis_charts['volume_trend'] = volume_chart
+        
+        # 10. MA200分析
+        ma200_chart = self._create_ma200_analysis_chart(trades_with_sector)
+        analysis_charts['ma200_analysis'] = ma200_chart
+        
+        # 11. MA50分析
+        ma50_chart = self._create_ma50_analysis_chart(trades_with_sector)
+        analysis_charts['ma50_analysis'] = ma50_chart
+        
         return analysis_charts
     
     def _add_sector_info(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -86,14 +110,235 @@ class AnalysisEngine:
         return df
     
     def _add_eps_info(self, df: pd.DataFrame) -> pd.DataFrame:
-        """EPS情報を追加"""
+        """EPS情報と追加分析データを追加"""
         df = df.copy()
         
-        # EPSサプライズ情報（仮想データ - 実際にはAPIから取得）
-        np.random.seed(42)  # 再現性のため
-        df['eps_surprise_percent'] = np.random.normal(15, 10, len(df))
-        df['eps_growth_percent'] = np.random.normal(20, 30, len(df))
-        df['eps_acceleration'] = np.random.normal(5, 15, len(df))
+        # EPS情報を取得
+        eps_surprise_data = []
+        eps_growth_data = []
+        eps_acceleration_data = []
+        
+        for _, trade in df.iterrows():
+            try:
+                # EODHDからEPSデータを取得
+                url = f"https://eodhd.com/api/calendar/earnings"
+                params = {
+                    'api_token': self.data_fetcher.api_key,
+                    'fmt': 'json',
+                    'from': (pd.to_datetime(trade['entry_date']) - timedelta(days=5)).strftime('%Y-%m-%d'),
+                    'to': trade['entry_date'],
+                    'symbols': f"{trade['ticker']}.US"
+                }
+                
+                response = requests.get(url, params=params)
+                if response.status_code == 200:
+                    earnings_data = response.json()
+                    if earnings_data and len(earnings_data) > 0:
+                        latest_earnings = earnings_data[-1]
+                        
+                        # EPSサプライズ率の計算
+                        if 'eps' in latest_earnings and 'estimate' in latest_earnings:
+                            actual_eps = latest_earnings['eps']
+                            estimate_eps = latest_earnings['estimate']
+                            if estimate_eps != 0:
+                                eps_surprise = ((actual_eps - estimate_eps) / abs(estimate_eps)) * 100
+                                eps_surprise_data.append(eps_surprise)
+                            else:
+                                eps_surprise_data.append(0.0)
+                        else:
+                            eps_surprise_data.append(0.0)
+                        
+                        # EPS成長率の計算（前年同期比）
+                        # 過去のEPSデータを取得
+                        hist_params = {
+                            'api_token': self.data_fetcher.api_key,
+                            'fmt': 'json',
+                            'from': (pd.to_datetime(trade['entry_date']) - timedelta(days=370)).strftime('%Y-%m-%d'),
+                            'to': trade['entry_date'],
+                            'symbols': f"{trade['ticker']}.US"
+                        }
+                        
+                        hist_response = requests.get(url, params=hist_params)
+                        if hist_response.status_code == 200:
+                            hist_earnings = hist_response.json()
+                            if len(hist_earnings) >= 5:  # 前年同期のデータがある場合
+                                current_eps = hist_earnings[-1].get('eps', 0)
+                                year_ago_eps = hist_earnings[-5].get('eps', 0)
+                                if year_ago_eps != 0:
+                                    eps_growth = ((current_eps - year_ago_eps) / abs(year_ago_eps)) * 100
+                                    eps_growth_data.append(eps_growth)
+                                else:
+                                    eps_growth_data.append(0.0)
+                            else:
+                                eps_growth_data.append(0.0)
+                        else:
+                            eps_growth_data.append(0.0)
+                            
+                        # EPS加速度（仮の計算 - 2期前との成長率の差）
+                        if len(hist_earnings) >= 9:
+                            prev_growth = ((hist_earnings[-5].get('eps', 0) - hist_earnings[-9].get('eps', 0)) / 
+                                         abs(hist_earnings[-9].get('eps', 0)) * 100) if hist_earnings[-9].get('eps', 0) != 0 else 0
+                            current_growth = eps_growth_data[-1]
+                            eps_acceleration_data.append(current_growth - prev_growth)
+                        else:
+                            eps_acceleration_data.append(0.0)
+                    else:
+                        eps_surprise_data.append(0.0)
+                        eps_growth_data.append(0.0)
+                        eps_acceleration_data.append(0.0)
+                else:
+                    eps_surprise_data.append(0.0)
+                    eps_growth_data.append(0.0)
+                    eps_acceleration_data.append(0.0)
+            except:
+                eps_surprise_data.append(0.0)
+                eps_growth_data.append(0.0)
+                eps_acceleration_data.append(0.0)
+        
+        df['eps_surprise_percent'] = eps_surprise_data
+        df['eps_growth_percent'] = eps_growth_data
+        df['eps_acceleration'] = eps_acceleration_data
+        
+        # ギャップサイズの計算（既存のgapカラムがある場合はそれを使用）
+        if 'gap' not in df.columns:
+            gap_data = []
+            for _, trade in df.iterrows():
+                try:
+                    # エントリー日とその前日の株価データを取得
+                    stock_data = self.data_fetcher.get_historical_data(
+                        trade['ticker'],
+                        (pd.to_datetime(trade['entry_date']) - timedelta(days=5)).strftime('%Y-%m-%d'),
+                        trade['entry_date']
+                    )
+                    
+                    if stock_data is not None and len(stock_data) >= 2:
+                        # エントリー日のオープン価格と前日のクローズ価格を取得
+                        entry_date_str = trade['entry_date']
+                        if entry_date_str in stock_data['date'].values:
+                            entry_idx = stock_data[stock_data['date'] == entry_date_str].index[0]
+                            if entry_idx > 0:
+                                entry_open = stock_data.iloc[entry_idx]['Open']
+                                prev_close = stock_data.iloc[entry_idx - 1]['Close']
+                                gap = ((entry_open - prev_close) / prev_close) * 100
+                                gap_data.append(gap)
+                            else:
+                                gap_data.append(0.0)
+                        else:
+                            gap_data.append(0.0)
+                    else:
+                        gap_data.append(0.0)
+                except:
+                    gap_data.append(0.0)
+            
+            df['gap'] = gap_data
+        
+        # 決算前20日間の価格変化率を計算
+        pre_earnings_changes = []
+        for _, trade in df.iterrows():
+            # 決算前30日間のデータを取得（20日間の変化率を計算するため）
+            pre_earnings_start = (pd.to_datetime(trade['entry_date']) - 
+                                timedelta(days=30)).strftime('%Y-%m-%d')
+            try:
+                stock_data = self.data_fetcher.get_historical_data(
+                    trade['ticker'],
+                    pre_earnings_start,
+                    trade['entry_date']
+                )
+                
+                if stock_data is not None and len(stock_data) >= 20:
+                    # 20日間の価格変化率を計算
+                    price_change = ((stock_data['Close'].iloc[-1] - stock_data['Close'].iloc[-20]) / 
+                                  stock_data['Close'].iloc[-20] * 100)
+                    pre_earnings_changes.append(price_change)
+                else:
+                    pre_earnings_changes.append(0.0)  # デフォルト値
+            except:
+                pre_earnings_changes.append(0.0)  # エラー時のデフォルト値
+        
+        df['pre_earnings_change'] = pre_earnings_changes
+        
+        # 出来高関連データを計算
+        volume_changes = []
+        for _, trade in df.iterrows():
+            # 決算前90日間のデータを取得
+            pre_earnings_start = (pd.to_datetime(trade['entry_date']) - 
+                                timedelta(days=90)).strftime('%Y-%m-%d')
+            try:
+                stock_data = self.data_fetcher.get_historical_data(
+                    trade['ticker'],
+                    pre_earnings_start,
+                    trade['entry_date']
+                )
+                
+                if stock_data is not None and len(stock_data) >= 60:
+                    # 直近20日と過去60日の平均出来高を計算
+                    recent_volume = stock_data['Volume'].tail(20).mean()
+                    historical_volume = stock_data['Volume'].tail(60).mean()
+                    
+                    # 出来高比率を計算（recent / historicalの比率）
+                    volume_ratio = recent_volume / historical_volume if historical_volume > 0 else 1.0
+                    volume_changes.append(volume_ratio)
+                else:
+                    volume_changes.append(1.0)  # デフォルト値
+            except:
+                volume_changes.append(1.0)  # エラー時のデフォルト値
+        
+        df['volume_ratio'] = volume_changes
+        
+        # 移動平均関連データを計算
+        ma200_ratios = []
+        ma50_ratios = []
+        
+        for _, trade in df.iterrows():
+            try:
+                # 移動平均計算のために十分な期間のデータを取得
+                stock_data = self.data_fetcher.get_historical_data(
+                    trade['ticker'],
+                    (pd.to_datetime(trade['entry_date']) - timedelta(days=250)).strftime('%Y-%m-%d'),
+                    trade['entry_date']
+                )
+                
+                if stock_data is not None and len(stock_data) >= 200:
+                    # DataFrameに変換してインデックスを設定
+                    stock_df = pd.DataFrame(stock_data)
+                    stock_df['date'] = pd.to_datetime(stock_df['date'])
+                    stock_df.set_index('date', inplace=True)
+                    
+                    # 移動平均を計算
+                    stock_df['MA200'] = stock_df['Close'].rolling(window=200).mean()
+                    stock_df['MA50'] = stock_df['Close'].rolling(window=50).mean()
+                    
+                    # エントリー日の価格と移動平均を取得
+                    entry_date_dt = pd.to_datetime(trade['entry_date'])
+                    if entry_date_dt in stock_df.index:
+                        latest_close = stock_df.loc[entry_date_dt, 'Close']
+                        latest_ma200 = stock_df.loc[entry_date_dt, 'MA200']
+                        latest_ma50 = stock_df.loc[entry_date_dt, 'MA50']
+                        
+                        # 価格と移動平均の比率を計算
+                        if pd.notna(latest_ma200) and latest_ma200 > 0:
+                            ma200_ratio = latest_close / latest_ma200
+                            ma200_ratios.append(ma200_ratio)
+                        else:
+                            ma200_ratios.append(1.0)
+                            
+                        if pd.notna(latest_ma50) and latest_ma50 > 0:
+                            ma50_ratio = latest_close / latest_ma50
+                            ma50_ratios.append(ma50_ratio)
+                        else:
+                            ma50_ratios.append(1.0)
+                    else:
+                        ma200_ratios.append(1.0)
+                        ma50_ratios.append(1.0)
+                else:
+                    ma200_ratios.append(1.0)
+                    ma50_ratios.append(1.0)
+            except Exception as e:
+                ma200_ratios.append(1.0)
+                ma50_ratios.append(1.0)
+        
+        df['price_to_ma200'] = ma200_ratios
+        df['price_to_ma50'] = ma50_ratios
         
         return df
     
@@ -603,3 +848,374 @@ class AnalysisEngine:
         )
         
         return fig.to_html(include_plotlyjs='cdn', div_id="eps-acceleration-chart")
+    
+    def _create_industry_performance_chart(self, df: pd.DataFrame) -> str:
+        """業界パフォーマンス分析（Top 15）"""
+        # 業界別パフォーマンス集計
+        industry_perf = df.groupby('industry').agg({
+            'pnl_rate': ['mean', 'count'],
+            'pnl': 'sum'
+        }).round(2)
+        
+        industry_perf.columns = ['avg_return', 'trade_count', 'total_pnl']
+        industry_perf = industry_perf[industry_perf['trade_count'] >= 1]  # 最低1取引
+        industry_perf = industry_perf.sort_values('avg_return', ascending=False).head(15)
+        
+        # チャート作成
+        colors = [self.theme['profit_color'] if x > 0 else self.theme['loss_color'] 
+                 for x in industry_perf['avg_return']]
+        
+        fig = go.Figure(data=[
+            go.Bar(
+                x=industry_perf.index,
+                y=industry_perf['avg_return'],
+                marker_color=colors,
+                text=[f"{val:.1f}%" for val in industry_perf['avg_return']],
+                textposition='outside',
+                hovertemplate='<b>%{x}</b><br>Avg Return: %{y:.1f}%<br>Trades: %{customdata}<extra></extra>',
+                customdata=industry_perf['trade_count']
+            )
+        ])
+        
+        # 取引数を追加のトレースとして表示
+        fig.add_trace(go.Scatter(
+            x=industry_perf.index,
+            y=industry_perf['trade_count'],
+            mode='lines+markers',
+            name='Trade Count',
+            line=dict(color=self.theme['line_color'], width=2),
+            marker=dict(size=8),
+            yaxis='y2',
+            hovertemplate='Trade Count: %{y}<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title=dict(
+                text='Industry Performance (Top 15)',
+                font=dict(color=self.theme['text_color'], size=18)
+            ),
+            xaxis=dict(
+                title='Industry',
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                title_font=dict(color=self.theme['text_color']),
+                tickangle=-45
+            ),
+            yaxis=dict(
+                title='Average Return (%)',
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                title_font=dict(color=self.theme['text_color'])
+            ),
+            yaxis2=dict(
+                title='Trade Count',
+                overlaying='y',
+                side='right',
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                title_font=dict(color=self.theme['text_color'])
+            ),
+            paper_bgcolor=self.theme['bg_color'],
+            plot_bgcolor=self.theme['plot_bg_color'],
+            font=dict(color=self.theme['text_color']),
+            height=500,
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1,
+                font=dict(color=self.theme['text_color'])
+            )
+        )
+        
+        return fig.to_html(include_plotlyjs='cdn', div_id="industry-performance-chart")
+    
+    def _create_gap_performance_chart(self, df: pd.DataFrame) -> str:
+        """ギャップサイズ別パフォーマンス分析"""
+        # ギャップサイズ別にグループ化
+        df['gap_range'] = pd.cut(df['gap'], 
+                               bins=[-float('inf'), 0, 2, 5, 10, float('inf')],
+                               labels=['Negative', '0-2%', '2-5%', '5-10%', '10%+'])
+        
+        gap_perf = df.groupby('gap_range').agg({
+            'pnl_rate': ['mean', 'count'],
+            'pnl': 'sum'
+        }).round(2)
+        
+        gap_perf.columns = ['avg_return', 'trade_count', 'total_pnl']
+        
+        # チャート作成
+        colors = [self.theme['profit_color'] if x > 0 else self.theme['loss_color'] 
+                 for x in gap_perf['avg_return']]
+        
+        fig = go.Figure(data=[
+            go.Bar(
+                x=gap_perf.index,
+                y=gap_perf['avg_return'],
+                marker_color=colors,
+                text=[f"{val:.1f}%<br>({count})" for val, count in 
+                     zip(gap_perf['avg_return'], gap_perf['trade_count'])],
+                textposition='outside',
+                hovertemplate='<b>%{x}</b><br>Avg Return: %{y:.1f}%<br>Trades: %{customdata}<extra></extra>',
+                customdata=gap_perf['trade_count']
+            )
+        ])
+        
+        fig.update_layout(
+            title=dict(
+                text='Performance by Gap Size',
+                font=dict(color=self.theme['text_color'], size=18)
+            ),
+            xaxis=dict(
+                title='Gap Size Range',
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                title_font=dict(color=self.theme['text_color'])
+            ),
+            yaxis=dict(
+                title='Average Return (%)',
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                title_font=dict(color=self.theme['text_color'])
+            ),
+            paper_bgcolor=self.theme['bg_color'],
+            plot_bgcolor=self.theme['plot_bg_color'],
+            font=dict(color=self.theme['text_color'])
+        )
+        
+        return fig.to_html(include_plotlyjs='cdn', div_id="gap-performance-chart")
+    
+    def _create_pre_earnings_performance_chart(self, df: pd.DataFrame) -> str:
+        """決算前トレンド別パフォーマンス分析"""
+        # 決算前変化率でグループ化（earnings_backtest.pyと同じビン設定）
+        df['pre_earnings_range'] = pd.cut(df['pre_earnings_change'], 
+                                        bins=[-float('inf'), -20, -10, 0, 10, 20, float('inf')],
+                                        labels=['<-20%', '-20~-10%', '-10~0%', '0~10%', '10~20%', '>20%'])
+        
+        pre_perf = df.groupby('pre_earnings_range').agg({
+            'pnl_rate': ['mean', 'count'],
+            'pnl': 'sum'
+        }).round(2)
+        
+        pre_perf.columns = ['avg_return', 'trade_count', 'total_pnl']
+        
+        # チャート作成
+        colors = [self.theme['profit_color'] if x > 0 else self.theme['loss_color'] 
+                 for x in pre_perf['avg_return']]
+        
+        fig = go.Figure(data=[
+            go.Bar(
+                x=pre_perf.index,
+                y=pre_perf['avg_return'],
+                marker_color=colors,
+                text=[f"{val:.1f}%<br>({count})" for val, count in 
+                     zip(pre_perf['avg_return'], pre_perf['trade_count'])],
+                textposition='outside',
+                hovertemplate='<b>%{x}</b><br>Avg Return: %{y:.1f}%<br>Trades: %{customdata}<extra></extra>',
+                customdata=pre_perf['trade_count']
+            )
+        ])
+        
+        fig.update_layout(
+            title=dict(
+                text='Performance by Pre-Earnings Trend',
+                font=dict(color=self.theme['text_color'], size=18)
+            ),
+            xaxis=dict(
+                title='Pre-Earnings 20-Day Change',
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                title_font=dict(color=self.theme['text_color'])
+            ),
+            yaxis=dict(
+                title='Average Return (%)',
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                title_font=dict(color=self.theme['text_color'])
+            ),
+            paper_bgcolor=self.theme['bg_color'],
+            plot_bgcolor=self.theme['plot_bg_color'],
+            font=dict(color=self.theme['text_color'])
+        )
+        
+        return fig.to_html(include_plotlyjs='cdn', div_id="pre-earnings-performance-chart")
+    
+    def _create_volume_trend_chart(self, df: pd.DataFrame) -> str:
+        """出来高トレンド分析"""
+        # 出来高比率でグループ化
+        df['volume_range'] = pd.cut(df['volume_ratio'], 
+                                  bins=[0, 1.5, 2.0, 3.0, 4.0, float('inf')],
+                                  labels=['1.0-1.5x', '1.5-2.0x', '2.0-3.0x', '3.0-4.0x', '4.0x+'])
+        
+        vol_perf = df.groupby('volume_range').agg({
+            'pnl_rate': ['mean', 'count'],
+            'pnl': 'sum'
+        }).round(2)
+        
+        vol_perf.columns = ['avg_return', 'trade_count', 'total_pnl']
+        
+        # チャート作成
+        colors = [self.theme['profit_color'] if x > 0 else self.theme['loss_color'] 
+                 for x in vol_perf['avg_return']]
+        
+        fig = go.Figure(data=[
+            go.Bar(
+                x=vol_perf.index,
+                y=vol_perf['avg_return'],
+                marker_color=colors,
+                text=[f"{val:.1f}%<br>({count})" for val, count in 
+                     zip(vol_perf['avg_return'], vol_perf['trade_count'])],
+                textposition='outside',
+                hovertemplate='<b>%{x}</b><br>Avg Return: %{y:.1f}%<br>Trades: %{customdata}<extra></extra>',
+                customdata=vol_perf['trade_count']
+            )
+        ])
+        
+        fig.update_layout(
+            title=dict(
+                text='Volume Trend Analysis',
+                font=dict(color=self.theme['text_color'], size=18)
+            ),
+            xaxis=dict(
+                title='Volume Ratio vs Average',
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                title_font=dict(color=self.theme['text_color'])
+            ),
+            yaxis=dict(
+                title='Average Return (%)',
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                title_font=dict(color=self.theme['text_color'])
+            ),
+            paper_bgcolor=self.theme['bg_color'],
+            plot_bgcolor=self.theme['plot_bg_color'],
+            font=dict(color=self.theme['text_color'])
+        )
+        
+        return fig.to_html(include_plotlyjs='cdn', div_id="volume-trend-chart")
+    
+    def _create_ma200_analysis_chart(self, df: pd.DataFrame) -> str:
+        """MA200分析"""
+        # MA200との比率でグループ化
+        df['ma200_range'] = pd.cut(df['price_to_ma200'], 
+                                 bins=[0, 0.9, 1.0, 1.1, 1.2, float('inf')],
+                                 labels=['<90%', '90-100%', '100-110%', '110-120%', '>120%'])
+        
+        ma200_perf = df.groupby('ma200_range').agg({
+            'pnl_rate': ['mean', 'count'],
+            'pnl': 'sum'
+        }).round(2)
+        
+        ma200_perf.columns = ['avg_return', 'trade_count', 'total_pnl']
+        
+        # チャート作成
+        colors = [self.theme['profit_color'] if x > 0 else self.theme['loss_color'] 
+                 for x in ma200_perf['avg_return']]
+        
+        fig = go.Figure(data=[
+            go.Bar(
+                x=ma200_perf.index,
+                y=ma200_perf['avg_return'],
+                marker_color=colors,
+                text=[f"{val:.1f}%<br>({count})" for val, count in 
+                     zip(ma200_perf['avg_return'], ma200_perf['trade_count'])],
+                textposition='outside',
+                hovertemplate='<b>%{x}</b><br>Avg Return: %{y:.1f}%<br>Trades: %{customdata}<extra></extra>',
+                customdata=ma200_perf['trade_count']
+            )
+        ])
+        
+        fig.update_layout(
+            title=dict(
+                text='MA200 Analysis',
+                font=dict(color=self.theme['text_color'], size=18)
+            ),
+            xaxis=dict(
+                title='Price vs MA200',
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                title_font=dict(color=self.theme['text_color'])
+            ),
+            yaxis=dict(
+                title='Average Return (%)',
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                title_font=dict(color=self.theme['text_color'])
+            ),
+            paper_bgcolor=self.theme['bg_color'],
+            plot_bgcolor=self.theme['plot_bg_color'],
+            font=dict(color=self.theme['text_color'])
+        )
+        
+        return fig.to_html(include_plotlyjs='cdn', div_id="ma200-analysis-chart")
+    
+    def _create_ma50_analysis_chart(self, df: pd.DataFrame) -> str:
+        """MA50分析"""
+        # MA50との比率でグループ化
+        df['ma50_range'] = pd.cut(df['price_to_ma50'], 
+                                bins=[0, 0.95, 1.0, 1.05, 1.1, float('inf')],
+                                labels=['<95%', '95-100%', '100-105%', '105-110%', '>110%'])
+        
+        ma50_perf = df.groupby('ma50_range').agg({
+            'pnl_rate': ['mean', 'count'],
+            'pnl': 'sum'
+        }).round(2)
+        
+        ma50_perf.columns = ['avg_return', 'trade_count', 'total_pnl']
+        
+        # チャート作成
+        colors = [self.theme['profit_color'] if x > 0 else self.theme['loss_color'] 
+                 for x in ma50_perf['avg_return']]
+        
+        fig = go.Figure(data=[
+            go.Bar(
+                x=ma50_perf.index,
+                y=ma50_perf['avg_return'],
+                marker_color=colors,
+                text=[f"{val:.1f}%<br>({count})" for val, count in 
+                     zip(ma50_perf['avg_return'], ma50_perf['trade_count'])],
+                textposition='outside',
+                hovertemplate='<b>%{x}</b><br>Avg Return: %{y:.1f}%<br>Trades: %{customdata}<extra></extra>',
+                customdata=ma50_perf['trade_count']
+            )
+        ])
+        
+        fig.update_layout(
+            title=dict(
+                text='MA50 Analysis',
+                font=dict(color=self.theme['text_color'], size=18)
+            ),
+            xaxis=dict(
+                title='Price vs MA50',
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                title_font=dict(color=self.theme['text_color'])
+            ),
+            yaxis=dict(
+                title='Average Return (%)',
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                title_font=dict(color=self.theme['text_color'])
+            ),
+            paper_bgcolor=self.theme['bg_color'],
+            plot_bgcolor=self.theme['plot_bg_color'],
+            font=dict(color=self.theme['text_color'])
+        )
+        
+        return fig.to_html(include_plotlyjs='cdn', div_id="ma50-analysis-chart")

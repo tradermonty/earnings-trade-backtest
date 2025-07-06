@@ -14,7 +14,7 @@ class TradeExecutor:
                  initial_capital: float = 10000, position_size: float = 6,
                  stop_loss: float = 6, trail_stop_ma: int = 21,
                  max_holding_days: int = 90, slippage: float = 0.3,
-                 partial_profit: bool = True):
+                 partial_profit: bool = True, margin_ratio: float = 1.5):
         """TradeExecutorの初期化"""
         self.data_fetcher = data_fetcher
         self.risk_manager = risk_manager
@@ -25,10 +25,17 @@ class TradeExecutor:
         self.max_holding_days = max_holding_days
         self.slippage = slippage
         self.partial_profit = partial_profit
+        self.margin_ratio = margin_ratio
         
         # トレード記録
         self.trades = []
         self.current_capital = initial_capital
+        
+        # 日次ポジション追跡
+        self.daily_positions = {}  # {date_str: {'total_value': float, 'positions': [position_dict]}}
+        self.active_positions = []  # 現在のアクティブポジション
+        self.start_date = None
+        self.end_date = None
     
     def execute_backtest(self, trade_candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """バックテストの実行"""
@@ -39,9 +46,20 @@ class TradeExecutor:
         print(f"トレーリングストップMA: {self.trail_stop_ma}日")
         print(f"最大保有期間: {self.max_holding_days}日")
         print(f"スリッページ: {self.slippage}%")
+        print(f"マージン倍率制限: {self.margin_ratio}倍")
         
         self.trades = []
         self.current_capital = self.initial_capital
+        self.active_positions = []
+        self.daily_positions = {}
+        
+        # バックテスト期間の設定
+        if trade_candidates:
+            dates = [candidate['trade_date'] for candidate in trade_candidates]
+            self.start_date = min(dates)
+            self.end_date = max(dates)
+            print(f"日次ポジション追跡期間: {self.start_date} から {self.end_date}")
+        
         total_candidates = len(trade_candidates)
         
         # tqdmを使用してプログレスバーを表示
@@ -64,9 +82,13 @@ class TradeExecutor:
                 tqdm.write(f"エラー ({candidate.get('code', 'Unknown')}): {str(e)}")
                 continue
         
+        # 全期間の日次ポジション追跡を完了
+        self._finalize_daily_positions()
+        
         print("\n5. バックテスト完了")
         print(f"実行したトレード数: {len(self.trades)}")
         print(f"最終資産: ${self.current_capital:,.2f}")
+        print(f"日次ポジションデータ: {len(self.daily_positions)}日分")
         
         return self.trades
     
@@ -95,10 +117,43 @@ class TradeExecutor:
         entry_price = position_info['adjusted_entry_price']
         shares = position_info['shares']
         
+        # エントリー前に現在のポジション総額をチェック
+        current_positions_count = 0
+        current_total_position_value = 0
+        
+        # 既存のトレードから、現在の日付でオープンしているものを探す
+        for trade in self.trades:
+            if trade['entry_date'] <= entry_date and trade['exit_date'] >= entry_date:
+                current_positions_count += 1
+                current_total_position_value += trade['entry_price'] * trade['shares']
+        
+        # 新しいポジションを加えた場合の総額を計算
+        new_position_value = entry_price * shares
+        total_after_entry = current_total_position_value + new_position_value
+        
+        # ポジション総額が総資産のmargin_ratio倍を超える場合はエントリーしない
+        if total_after_entry > self.current_capital * self.margin_ratio:
+            tqdm.write(f"- スキップ: ポジション総額制限 (${total_after_entry:,.2f} > ${self.current_capital * self.margin_ratio:,.2f})")
+            return None
+        
         tqdm.write(f"- エントリー: ${entry_price:.2f} x {shares}株")
         
         # トレードの実行
         trades = []
+        
+        # ポジションをアクティブリストに追加
+        position = {
+            'symbol': symbol,
+            'entry_date': entry_date,
+            'entry_price': entry_price,
+            'shares': shares,
+            'position_value': new_position_value
+        }
+        self.active_positions.append(position)
+        
+        # エントリー後のポジション総額を表示
+        tqdm.write(f"  現在のポジション総額: ${total_after_entry:,.2f} ({current_positions_count + 1}銘柄)")
+        tqdm.write(f"  現在の総資産: ${self.current_capital:,.2f} (ポジション比率: {(total_after_entry / self.current_capital * 100):.1f}%)")
         
         # エントリー当日のストップロスチェック
         intraday_stop_trade = self._check_intraday_stop_loss(
@@ -107,6 +162,8 @@ class TradeExecutor:
         if intraday_stop_trade:
             trades.append(intraday_stop_trade)
             self.current_capital += intraday_stop_trade['pnl']
+            # ポジションを削除
+            self._remove_position(symbol, entry_date)
             return trades
         
         # 部分利確のチェック
@@ -117,6 +174,8 @@ class TradeExecutor:
             trades.append(partial_trade)
             self.current_capital += partial_trade['pnl']
             shares = remaining_shares
+            # ポジションを更新
+            self._update_position(symbol, entry_date, remaining_shares)
         
         # メインポジションの売却
         main_trade = self._execute_main_position_exit(
@@ -125,6 +184,8 @@ class TradeExecutor:
         if main_trade:
             trades.append(main_trade)
             self.current_capital += main_trade['pnl']
+            # ポジションを削除
+            self._remove_position(symbol, entry_date)
         
         return trades
     
@@ -326,3 +387,74 @@ class TradeExecutor:
         except Exception as e:
             tqdm.write(f"メインポジション売却エラー: {str(e)}")
             return None
+    
+    def _update_position(self, symbol: str, entry_date: str, new_shares: int):
+        """ポジションの株数を更新"""
+        for position in self.active_positions:
+            if position['symbol'] == symbol and position['entry_date'] == entry_date:
+                position['shares'] = new_shares
+                position['position_value'] = position['entry_price'] * new_shares
+                break
+    
+    def _remove_position(self, symbol: str, entry_date: str):
+        """ポジションを削除"""
+        self.active_positions = [
+            pos for pos in self.active_positions 
+            if not (pos['symbol'] == symbol and pos['entry_date'] == entry_date)
+        ]
+    
+    def _finalize_daily_positions(self):
+        """全期間の日次ポジション追跡を完了"""
+        if not self.start_date or not self.end_date:
+            return
+        
+        print("\n6. 日次ポジション追跡を完了中...")
+        
+        # 全取引日を生成
+        start_dt = datetime.strptime(self.start_date, '%Y-%m-%d')
+        end_dt = datetime.strptime(self.end_date, '%Y-%m-%d')
+        
+        current_date = start_dt
+        while current_date <= end_dt:
+            date_str = current_date.strftime('%Y-%m-%d')
+            
+            # 土日をスキップ
+            if current_date.weekday() < 5:  # 月曜日=0, 日曜日=6
+                self._calculate_daily_position(date_str)
+            
+            current_date += timedelta(days=1)
+    
+    def _calculate_daily_position(self, date_str: str):
+        """指定日のポジション総額を計算"""
+        active_positions_on_date = []
+        total_position_value = 0
+        
+        for trade in self.trades:
+            entry_date = trade['entry_date']
+            exit_date = trade['exit_date']
+            
+            # 指定日がトレード期間内かチェック
+            if entry_date <= date_str <= exit_date:
+                position_value = trade['entry_price'] * trade['shares']
+                active_positions_on_date.append({
+                    'symbol': trade['ticker'],
+                    'entry_date': entry_date,
+                    'entry_price': trade['entry_price'],
+                    'shares': trade['shares'],
+                    'position_value': position_value
+                })
+                total_position_value += position_value
+        
+        self.daily_positions[date_str] = {
+            'total_value': total_position_value,
+            'positions': active_positions_on_date,
+            'num_positions': len(active_positions_on_date)
+        }
+    
+    def get_daily_positions_data(self) -> Dict[str, Any]:
+        """日次ポジションデータを取得"""
+        return {
+            'daily_positions': self.daily_positions,
+            'start_date': self.start_date,
+            'end_date': self.end_date
+        }
