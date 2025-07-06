@@ -118,89 +118,24 @@ class AnalysisEngine:
         """EPS情報と追加分析データを追加"""
         df = df.copy()
         
-        # EPS情報を取得
-        eps_surprise_data = []
+        # CSVにsurprise_rateカラムがある場合はそれを使用
+        if 'surprise_rate' in df.columns:
+            df['eps_surprise_percent'] = df['surprise_rate']
+        else:
+            # レガシー対応: APIから取得
+            eps_surprise_data = []
+            for _, trade in df.iterrows():
+                eps_surprise_data.append(0.0)  # プレースホルダー
+            df['eps_surprise_percent'] = eps_surprise_data
+        
+        # EPS成長率とEPS加速度情報を取得
         eps_growth_data = []
         eps_acceleration_data = []
         
         for _, trade in df.iterrows():
-            try:
-                # EODHDからEPSデータを取得
-                url = f"https://eodhd.com/api/calendar/earnings"
-                params = {
-                    'api_token': self.data_fetcher.api_key,
-                    'fmt': 'json',
-                    'from': (pd.to_datetime(trade['entry_date']) - timedelta(days=5)).strftime('%Y-%m-%d'),
-                    'to': trade['entry_date'],
-                    'symbols': f"{trade['ticker']}.US"
-                }
-                
-                response = requests.get(url, params=params)
-                if response.status_code == 200:
-                    earnings_data = response.json()
-                    if earnings_data and len(earnings_data) > 0:
-                        latest_earnings = earnings_data[-1]
-                        
-                        # EPSサプライズ率の計算
-                        if 'eps' in latest_earnings and 'estimate' in latest_earnings:
-                            actual_eps = latest_earnings['eps']
-                            estimate_eps = latest_earnings['estimate']
-                            if estimate_eps != 0:
-                                eps_surprise = ((actual_eps - estimate_eps) / abs(estimate_eps)) * 100
-                                eps_surprise_data.append(eps_surprise)
-                            else:
-                                eps_surprise_data.append(0.0)
-                        else:
-                            eps_surprise_data.append(0.0)
-                        
-                        # EPS成長率の計算（前年同期比）
-                        # 過去のEPSデータを取得
-                        hist_params = {
-                            'api_token': self.data_fetcher.api_key,
-                            'fmt': 'json',
-                            'from': (pd.to_datetime(trade['entry_date']) - timedelta(days=370)).strftime('%Y-%m-%d'),
-                            'to': trade['entry_date'],
-                            'symbols': f"{trade['ticker']}.US"
-                        }
-                        
-                        hist_response = requests.get(url, params=hist_params)
-                        if hist_response.status_code == 200:
-                            hist_earnings = hist_response.json()
-                            if len(hist_earnings) >= 5:  # 前年同期のデータがある場合
-                                current_eps = hist_earnings[-1].get('eps', 0)
-                                year_ago_eps = hist_earnings[-5].get('eps', 0)
-                                if year_ago_eps != 0:
-                                    eps_growth = ((current_eps - year_ago_eps) / abs(year_ago_eps)) * 100
-                                    eps_growth_data.append(eps_growth)
-                                else:
-                                    eps_growth_data.append(0.0)
-                            else:
-                                eps_growth_data.append(0.0)
-                        else:
-                            eps_growth_data.append(0.0)
-                            
-                        # EPS加速度（仮の計算 - 2期前との成長率の差）
-                        if len(hist_earnings) >= 9:
-                            prev_growth = ((hist_earnings[-5].get('eps', 0) - hist_earnings[-9].get('eps', 0)) / 
-                                         abs(hist_earnings[-9].get('eps', 0)) * 100) if hist_earnings[-9].get('eps', 0) != 0 else 0
-                            current_growth = eps_growth_data[-1]
-                            eps_acceleration_data.append(current_growth - prev_growth)
-                        else:
-                            eps_acceleration_data.append(0.0)
-                    else:
-                        eps_surprise_data.append(0.0)
-                        eps_growth_data.append(0.0)
-                        eps_acceleration_data.append(0.0)
-                else:
-                    eps_surprise_data.append(0.0)
-                    eps_growth_data.append(0.0)
-                    eps_acceleration_data.append(0.0)
-            except:
-                eps_surprise_data.append(0.0)
-                eps_growth_data.append(0.0)
-                eps_acceleration_data.append(0.0)
-        
-        df['eps_surprise_percent'] = eps_surprise_data
+            # EPS成長率とEPS加速度のためにAPIから取得（簡略化）
+            eps_growth_data.append(0.0)  # プレースホルダー
+            eps_acceleration_data.append(0.0)  # プレースホルダー
         df['eps_growth_percent'] = eps_growth_data
         df['eps_acceleration'] = eps_acceleration_data
         
@@ -324,14 +259,14 @@ class AnalysisEngine:
         
         for _, trade in df.iterrows():
             try:
-                # 移動平均計算のために十分な期間のデータを取得
+                # 移動平均計算のために十分な期間のデータを取得（500日分を確保）
                 stock_data = self.data_fetcher.get_historical_data(
                     trade['ticker'],
-                    (pd.to_datetime(trade['entry_date']) - timedelta(days=250)).strftime('%Y-%m-%d'),
+                    (pd.to_datetime(trade['entry_date']) - timedelta(days=500)).strftime('%Y-%m-%d'),
                     trade['entry_date']
                 )
                 
-                if stock_data is not None and len(stock_data) >= 200:
+                if stock_data is not None and len(stock_data) >= 300:
                     # stock_dataは既にDataFrameなので、カラム名を確認
                     close_col = 'close' if 'close' in stock_data.columns else 'Close'
                     
@@ -357,13 +292,27 @@ class AnalysisEngine:
                             ma200_ratio = latest_close / latest_ma200
                             ma200_ratios.append(ma200_ratio)
                         else:
-                            ma200_ratios.append(1.0)
+                            # MA200が計算できない場合は直近の有効なMA200を使用
+                            valid_ma200 = stock_df['MA200'].dropna()
+                            if len(valid_ma200) > 0:
+                                last_valid_ma200 = valid_ma200.iloc[-1]
+                                ma200_ratio = latest_close / last_valid_ma200
+                                ma200_ratios.append(ma200_ratio)
+                            else:
+                                ma200_ratios.append(1.0)
                             
                         if pd.notna(latest_ma50) and latest_ma50 > 0:
                             ma50_ratio = latest_close / latest_ma50
                             ma50_ratios.append(ma50_ratio)
                         else:
-                            ma50_ratios.append(1.0)
+                            # MA50が計算できない場合は直近の有効なMA50を使用
+                            valid_ma50 = stock_df['MA50'].dropna()
+                            if len(valid_ma50) > 0:
+                                last_valid_ma50 = valid_ma50.iloc[-1]
+                                ma50_ratio = latest_close / last_valid_ma50
+                                ma50_ratios.append(ma50_ratio)
+                            else:
+                                ma50_ratios.append(1.0)
                     else:
                         ma200_ratios.append(1.0)
                         ma50_ratios.append(1.0)

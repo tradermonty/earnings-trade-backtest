@@ -157,7 +157,7 @@ class TradeExecutor:
         
         # エントリー当日のストップロスチェック
         intraday_stop_trade = self._check_intraday_stop_loss(
-            stock_data, entry_date, symbol, shares, entry_price, candidate['gap']
+            stock_data, entry_date, symbol, shares, entry_price, candidate['gap'], candidate.get('percent', 0.0)
         )
         if intraday_stop_trade:
             trades.append(intraday_stop_trade)
@@ -179,7 +179,7 @@ class TradeExecutor:
         
         # メインポジションの売却
         main_trade = self._execute_main_position_exit(
-            stock_data, entry_date, symbol, shares, entry_price, candidate['gap']
+            stock_data, entry_date, symbol, shares, entry_price, candidate['gap'], candidate.get('percent', 0.0)
         )
         if main_trade:
             trades.append(main_trade)
@@ -220,7 +220,7 @@ class TradeExecutor:
     
     def _check_intraday_stop_loss(self, stock_data: pd.DataFrame, entry_date: str,
                                  symbol: str, shares: int, entry_price: float,
-                                 gap: float) -> Optional[Dict[str, Any]]:
+                                 gap: float, surprise_rate: float = 0.0) -> Optional[Dict[str, Any]]:
         """エントリー当日のストップロスチェック"""
         try:
             trade_data = stock_data.loc[entry_date:]
@@ -248,7 +248,8 @@ class TradeExecutor:
                     'pnl_rate': trade_pnl_rate,
                     'holding_period': 0,
                     'exit_reason': "stop_loss_intraday",
-                    'gap': gap
+                    'gap': gap,
+                    'surprise_rate': surprise_rate
                 }
                 
                 tqdm.write(f"- 当日ストップロス: ${exit_price:.2f}")
@@ -310,7 +311,7 @@ class TradeExecutor:
     
     def _execute_main_position_exit(self, stock_data: pd.DataFrame, entry_date: str,
                                    symbol: str, shares: int, entry_price: float,
-                                   gap: float) -> Optional[Dict[str, Any]]:
+                                   gap: float, surprise_rate: float = 0.0) -> Optional[Dict[str, Any]]:
         """メインポジションの売却実行"""
         try:
             trade_data = stock_data.loc[entry_date:]
@@ -376,7 +377,8 @@ class TradeExecutor:
                 'holding_period': (datetime.strptime(exit_date, "%Y-%m-%d") - 
                                  datetime.strptime(entry_date, "%Y-%m-%d")).days,
                 'exit_reason': exit_reason,
-                'gap': gap
+                'gap': gap,
+                'surprise_rate': surprise_rate
             }
             
             tqdm.write(f"- 決済: ${exit_price:.2f} ({exit_reason})")
