@@ -15,7 +15,7 @@ A comprehensive backtesting system for earnings-based swing trading strategies, 
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/tradermonty/earnings-trade-backtest.git
 cd earnings-trade-backtest
 
 # Create and activate virtual environment
@@ -66,7 +66,6 @@ earnings-trade-backtest/
 ├── tests/                            # Comprehensive test suite
 ├── reports/                          # Generated analysis reports (after execution)
 ├── docs/                             # Documentation and screenshots
-├── earnings_backtest.py             # Legacy single-file implementation
 ├── main.py                          # Main entry point (recommended)
 ├── README.md                        # This file
 ├── README_ja.md                     # Japanese documentation

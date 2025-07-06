@@ -15,7 +15,7 @@
 
 ```bash
 # リポジトリをクローン
-git clone <repository-url>
+git clone https://github.com/tradermonty/earnings-trade-backtest.git
 cd earnings-trade-backtest
 
 # 仮想環境を作成・アクティベート
@@ -66,7 +66,6 @@ earnings-trade-backtest/
 ├── tests/                         # 包括的テストスイート
 ├── reports/                       # 生成された分析レポート（実行後）
 ├── docs/                          # ドキュメント・スクリーンショット
-├── earnings_backtest.py          # レガシー単一ファイル実装
 ├── main.py                        # メインエントリーポイント（推奨）
 ├── requirements.txt               # Python依存関係
 ├── CLAUDE.md                     # Claude向けドキュメント

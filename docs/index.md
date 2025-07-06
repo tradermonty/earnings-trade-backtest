@@ -43,13 +43,13 @@ EODHD_API_KEY=your_api_key_here
 
 ```bash
 # デフォルト設定で実行（過去1ヶ月）
-python earnings_backtest.py
+python main.py
 
 # 特定の期間を指定
-python earnings_backtest.py --start_date 2025-01-01 --end_date 2025-06-30
+python main.py --start_date 2025-01-01 --end_date 2025-06-30
 
 # ヘルプを表示
-python earnings_backtest.py --help
+python main.py --help
 ```
 
 ## 📋 主要機能

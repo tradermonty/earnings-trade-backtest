@@ -172,8 +172,7 @@ reports/*.html
 *.gif
 *.pdf
 
-# Allow GitHub Pages files
-!index.html
+# Allow GitHub Pages files (if needed)
 !docs/*.html
 
 # Articles and documentation
@@ -185,6 +184,9 @@ logs/
 
 # Test files (keep in repository)
 !tests/
+
+# Debug files (development only)
+debug/
 
 # Temporary files
 tmp/
