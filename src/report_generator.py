@@ -612,15 +612,15 @@ class ReportGenerator:
         df_sorted['equity'] = metrics['initial_capital'] + df_sorted['cumulative_pnl']
         df_sorted['equity_pct'] = (df_sorted['equity'] / metrics['initial_capital'] - 1) * 100
         
-        # ドローダウンを計算
-        df_sorted['running_max'] = df_sorted['equity_pct'].cummax()
-        df_sorted['drawdown'] = df_sorted['running_max'] - df_sorted['equity_pct']
+        # ドローダウンを計算（正しい方法）
+        df_sorted['running_max'] = df_sorted['equity'].cummax()
+        df_sorted['drawdown_pct'] = ((df_sorted['running_max'] - df_sorted['equity']) / df_sorted['running_max'] * 100)
         
         fig = go.Figure()
         
         fig.add_trace(go.Scatter(
             x=pd.to_datetime(df_sorted['entry_date']),
-            y=-df_sorted['drawdown'],  # 負の値で表示
+            y=-df_sorted['drawdown_pct'],  # 負の値で表示
             mode='lines',
             name='Drawdown',
             line=dict(color=self.theme['loss_color']),
