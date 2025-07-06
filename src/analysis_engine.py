@@ -39,6 +39,7 @@ class AnalysisEngine:
         print("\nセクター情報の取得中...")
         trades_with_sector = self._add_sector_info(trades_df)
         
+        print("分析チャートの生成中...")
         # 1. 月次パフォーマンス分析
         monthly_chart = self._create_monthly_performance_chart(trades_with_sector)
         analysis_charts['monthly_performance'] = monthly_chart
@@ -133,11 +134,8 @@ class AnalysisEngine:
         if 'surprise_rate' in df.columns:
             df['eps_surprise_percent'] = df['surprise_rate']
         else:
-            # レガシー対応: APIから取得
-            eps_surprise_data = []
-            for _, trade in df.iterrows():
-                eps_surprise_data.append(0.0)  # プレースホルダー
-            df['eps_surprise_percent'] = eps_surprise_data
+            # surprise_rateが存在しない場合はエラーとして扱う
+            raise ValueError("EPSサプライズデータ（surprise_rate）が見つかりません。CSVファイルにsurprise_rateカラムが必要です。")
         
         # EPS成長率とEPS加速度情報を計算
         eps_growth_data = []
@@ -253,13 +251,15 @@ class AnalysisEngine:
                         price_change = ((latest_close - close_20_days_ago) / close_20_days_ago) * 100
                         pre_earnings_changes.append(price_change)
                     else:
-                        pre_earnings_changes.append(0.0)  # 無効なデータの場合のデフォルト値
+                        # 無効なデータの場合、市場平均的な変化率を仮定
+                        pre_earnings_changes.append(0.0)  # 中立的な変化率
                 else:
-                    pre_earnings_changes.append(0.0)  # データ不足の場合のデフォルト値
+                    # データ不足の場合、市場平均的な変化率を仮定
+                    pre_earnings_changes.append(0.0)  # 中立的な変化率
             except Exception as e:
-                # デバッグ用にエラーログを出力
-                print(f"Error calculating pre-earnings change for {trade['ticker']}: {str(e)}")
-                pre_earnings_changes.append(0.0)  # エラー時のデフォルト値
+                # エラーログ出力（本来はロガーを使用すべき）
+                print(f"Warning: Pre-earnings change calculation failed for {trade.get('ticker', 'Unknown')}: {str(e)}")
+                pre_earnings_changes.append(0.0)  # 中立的な変化率
         
         df['pre_earnings_change'] = pre_earnings_changes
         
@@ -289,13 +289,13 @@ class AnalysisEngine:
                         volume_ratio = recent_volume / historical_volume
                         volume_changes.append(volume_ratio)
                     else:
-                        volume_changes.append(1.0)  # 無効なデータの場合のデフォルト値
+                        volume_changes.append(1.0)  # 無効データ時は変化なしとみなす
                 else:
-                    volume_changes.append(1.0)  # データ不足の場合のデフォルト値
+                    volume_changes.append(1.0)  # データ不足時は変化なしとみなす
             except Exception as e:
-                # デバッグ用にエラーログを出力
-                print(f"Error calculating volume ratio for {trade['ticker']}: {str(e)}")
-                volume_changes.append(1.0)  # エラー時のデフォルト値
+                # エラーログ出力（本来はロガーを使用すべき）
+                print(f"Warning: Volume ratio calculation failed for {trade.get('ticker', 'Unknown')}: {str(e)}")
+                volume_changes.append(1.0)  # エラー時は変化なしとみなす
         
         df['volume_ratio'] = volume_changes
         
