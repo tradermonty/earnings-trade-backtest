@@ -159,15 +159,15 @@ class DataFilter:
                     skipped_count += 1
                     continue
 
-                # トレード日のデータを取得
-                trade_result = self._get_trade_date_data(
-                    stock_data, trade_date, symbol
+                # トレード日のデータを取得（ギャップアップ検証強化版）
+                trade_result = self._get_trade_date_data_with_validation(
+                    stock_data, trade_date, symbol, earning
                 )
                 if trade_result is None:
                     skipped_count += 1
                     continue
                 
-                trade_date_data, prev_day_data, gap = trade_result
+                trade_date_data, prev_day_data, gap, actual_trade_date = trade_result
 
                 # 平均出来高を計算
                 avg_volume = stock_data['Volume'].tail(20).mean()
@@ -181,11 +181,11 @@ class DataFilter:
                     skipped_count += 1
                     continue
                 
-                # データを保存
+                # データを保存（実際のトレード日を使用）
                 stock_info = {
                     'code': symbol,
                     'report_date': earning['report_date'],
-                    'trade_date': trade_date,
+                    'trade_date': actual_trade_date,  # 検証後の実際のトレード日
                     'price': trade_date_data['Open'],
                     'entry_price': trade_date_data['Open'],
                     'prev_close': prev_day_data['Close'],
@@ -195,7 +195,7 @@ class DataFilter:
                     'percent': float(earning['percent'])
                 }
                 
-                date_stocks[trade_date].append(stock_info)
+                date_stocks[actual_trade_date].append(stock_info)
                 processed_count += 1
                 tqdm.write("→ 条件適合")
                 
@@ -278,3 +278,84 @@ class DataFilter:
                       f"ギャップ{stock['gap']:.1f}%")
         
         return selected_stocks
+    
+    def _get_trade_date_data_with_validation(self, stock_data: pd.DataFrame, trade_date: str, 
+                                            symbol: str, earning: Dict) -> Optional[tuple]:
+        """
+        トレード日のデータを取得し、ギャップアップを検証
+        EODHDの決算日の問題を考慮し、決算日の翌日と2日後まで検証対象とし、
+        最適なギャップアップ日を自動選択する
+        """
+        try:
+            report_date = earning.get('report_date')
+            
+            # EODHDの日付ずれ問題対策：決算日の翌日と2日後をチェック
+            # （EODHDの決算日が実際より1日早い可能性があるため）
+            
+            # まずEODHDが示すトレード日を確認
+            if trade_date not in stock_data.index:
+                tqdm.write(f"- トレード日 {trade_date} のデータなし")
+                return None
+            
+            trade_date_idx = stock_data.index.get_loc(trade_date)
+            
+            # 最大2日先まで検証
+            best_trade_data = None
+            best_prev_data = None
+            best_gap = -100.0  # 最小値で初期化
+            best_trade_date = None
+            best_day_offset = 0
+            
+            for day_offset in range(1, 3):  # 1日後と2日後をチェック
+                # 検証日が存在しない場合はスキップ
+                if trade_date_idx + day_offset >= len(stock_data):
+                    continue
+                
+                # 検証日のデータを取得
+                check_day_data = stock_data.iloc[trade_date_idx + day_offset]
+                check_date = check_day_data.name.strftime('%Y-%m-%d')
+                
+                # 前営業日のデータ（ギャップ計算の基準日）
+                prev_day_data = stock_data.iloc[trade_date_idx + day_offset - 1]
+                
+                # ギャップ率を計算
+                gap = ((check_day_data['Open'] - prev_day_data['Close']) / 
+                       prev_day_data['Close']) * 100
+                
+                # 出来高の増加をチェック
+                volume_increase = check_day_data['Volume'] / prev_day_data['Volume']
+                
+                tqdm.write(f"- EODHD決算日: {report_date}, 検証日{day_offset}: {check_date}")
+                tqdm.write(f"  → ギャップ: {gap:.1f}%, 出来高増加: {volume_increase:.1f}倍")
+                
+                # ギャップが2%以上かつ出来高が1.2倍以上の場合、候補として保存
+                if gap >= 2.0 and volume_increase >= 1.2:
+                    # より良いギャップの日を選択
+                    if gap > best_gap:
+                        best_trade_data = check_day_data
+                        best_prev_data = prev_day_data
+                        best_gap = gap
+                        best_trade_date = check_date
+                        best_day_offset = day_offset
+            
+            # 条件を満たす日が見つかった場合
+            if best_trade_data is not None:
+                tqdm.write(f"  → 最適な検証日: {best_trade_date} (決算日+{best_day_offset}日)")
+                return best_trade_data, best_prev_data, best_gap, best_trade_date
+            
+            # 条件を満たす日がない場合、最もギャップの大きい日を返す（後でフィルタされる）
+            # 1日後のデータを返す（従来の動作と同じ）
+            if trade_date_idx + 1 < len(stock_data):
+                actual_trade_day_data = stock_data.iloc[trade_date_idx + 1]
+                actual_trade_date = actual_trade_day_data.name.strftime('%Y-%m-%d')
+                reported_day_data = stock_data.iloc[trade_date_idx]
+                gap = ((actual_trade_day_data['Open'] - reported_day_data['Close']) / 
+                       reported_day_data['Close']) * 100
+                return actual_trade_day_data, reported_day_data, gap, actual_trade_date
+            
+            tqdm.write("- スキップ: 検証可能な日のデータなし")
+            return None
+            
+        except Exception as e:
+            tqdm.write(f"- エラー: {str(e)}")
+            return None
