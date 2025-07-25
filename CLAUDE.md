@@ -21,12 +21,15 @@ beautifulsoup4
 
 ## Environment Setup
 
-1. Create a `.env` file with your EODHD API key:
+1. Create a `.env` file with your API keys:
    ```
-   EODHD_API_KEY=your_api_key_here
+   EODHD_API_KEY=your_eodhd_api_key_here
+   FMP_API_KEY=your_fmp_api_key_here
    ```
 
-2. The system uses EODHD API for fetching earnings and historical price data.
+2. The system supports two data sources:
+   - **EODHD API** (default): For earnings and historical price data
+   - **Financial Modeling Prep (FMP)** (recommended): Higher accuracy earnings data (90%+ vs 44% for EODHD)
 
 ## Running the Backtest
 
@@ -54,6 +57,12 @@ python main.py --margin_ratio 1.2
 
 # Disable mid/small cap filtering to include all stocks
 python main.py --no_mid_small_only
+
+# Use Financial Modeling Prep for higher accuracy (requires FMP API key)
+python main.py --use_fmp --start_date 2024-01-01
+
+# Combine FMP with earnings date validation for maximum accuracy
+python main.py --use_fmp --enable_date_validation --start_date 2024-01-01
 ```
 
 ## Key Architecture Components

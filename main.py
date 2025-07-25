@@ -18,7 +18,7 @@ from src.main import create_backtest_from_args
 def parse_arguments():
     """コマンドライン引数の解析"""
     parser = argparse.ArgumentParser(
-        description='Earnings-based swing trading backtest system',
+        description='Earnings-based swing trading backtest system (Default: FMP data source with US stocks only)',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     
@@ -55,15 +55,31 @@ def parse_arguments():
     parser.add_argument('--no_partial_profit', action='store_true',
                         help='Disable partial profit taking')
     
-    # 銘柄フィルタリング
+    # 銘柄フィルタリング (デフォルト: FMP + 全銘柄)
     parser.add_argument('--sp500_only', action='store_true',
                         help='Trade only S&P 500 stocks')
-    parser.add_argument('--no_mid_small_only', action='store_true',
-                        help='Disable mid/small cap filtering (include all stocks)')
+    parser.add_argument('--mid_small_only', action='store_true',
+                        help='Trade only mid/small cap stocks')
     
     # 出力設定
     parser.add_argument('--language', type=str, choices=['en', 'ja'], default='en',
                         help='Output language')
+    
+    # 決算日検証
+    parser.add_argument('--enable_date_validation', action='store_true',
+                        help='Enable earnings date validation using news analysis')
+    
+    # データソース選択 (デフォルト: FMP)
+    parser.add_argument('--use_eodhd', action='store_true',
+                        help='Use EODHD instead of default FMP data source (requires EODHD_API_KEY)')
+    
+    # 時価総額ベースフィルタリング (デフォルト: 無効)
+    parser.add_argument('--use_market_cap_filter', action='store_true',
+                        help='Enable market cap-based filtering for mid/small cap stocks')
+    parser.add_argument('--min_market_cap', type=float, default=1.0,
+                        help='Minimum market cap in billions for mid/small cap filtering (default: 1.0B)')
+    parser.add_argument('--max_market_cap', type=float, default=50.0,
+                        help='Maximum market cap in billions for mid/small cap filtering (default: 50.0B)')
     
     return parser.parse_args()
 
@@ -108,10 +124,18 @@ def main():
         
         if args.sp500_only:
             print("対象: S&P 500銘柄のみ")
-        elif not args.no_mid_small_only:
-            print("対象: 中型・小型株 (S&P 400/600)")
+        elif getattr(args, 'mid_small_only', False):
+            if getattr(args, 'use_market_cap_filter', False):
+                print("対象: 中型・小型株 (時価総額ベース)")
+            else:
+                print("対象: 中型・小型株 (S&P 400/600)")
         else:
-            print("対象: 全ての銘柄")
+            print("対象: 全てのアメリカ銘柄")
+        
+        if getattr(args, 'use_eodhd', False):
+            print("データソース: EODHD")
+        else:
+            print("データソース: Financial Modeling Prep (FMP)")
         
         print(f"言語: 日本語")
     else:
@@ -123,10 +147,18 @@ def main():
         
         if args.sp500_only:
             print("Target: S&P 500 stocks only")
-        elif not args.no_mid_small_only:
-            print("Target: Mid/Small-cap stocks (S&P 400/600)")
+        elif getattr(args, 'mid_small_only', False):
+            if getattr(args, 'use_market_cap_filter', False):
+                print("Target: Mid/Small-cap stocks (market cap based)")
+            else:
+                print("Target: Mid/Small-cap stocks (S&P 400/600)")
         else:
-            print("Target: All stocks")
+            print("Target: All US stocks")
+        
+        if getattr(args, 'use_eodhd', False):
+            print("Data Source: EODHD")
+        else:
+            print("Data Source: Financial Modeling Prep (FMP)")
         
         print(f"Language: English")
     print("-" * 50)

@@ -2,14 +2,15 @@
 
 *Read this in other languages: [English](README.md), [日本語](README_ja.md)*
 
-A comprehensive backtesting system for earnings-based swing trading strategies, specialized for mid and small-cap stocks using real-time data from EODHD API.
+A comprehensive backtesting system for earnings-based swing trading strategies, specialized for mid and small-cap stocks using real-time data from EODHD API (Advanced plan) or FinancialModelingPrep (FMP) API (Starter plan).
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
 - Python 3.11 or higher
-- [EODHD API](https://eodhistoricaldata.com/) key
+- [EODHD API](https://eodhistoricaldata.com/) key (Advanced plan, recommended)
+- (Optional) [FinancialModelingPrep API](https://site.financialmodelingprep.com/) key – Premium plan required
 
 ### Installation
 
@@ -30,10 +31,14 @@ pip install -r requirements.txt
 
 ### Environment Setup
 
-Create a `.env` file and configure your API key:
+Create a `.env` file and configure your API key(s):
 
 ```env
-EODHD_API_KEY=your_api_key_here
+# For EODHD (Advanced plan)
+EODHD_API_KEY=your_eodhd_api_key
+
+# For FMP (Starter plan) – optional
+FMP_API_KEY=your_fmp_api_key
 ```
 
 ### Basic Execution
@@ -54,7 +59,10 @@ python main.py --help
 ```
 earnings-trade-backtest/
 ├── src/                               # Core source code modules
-│   ├── data_fetcher.py               # EODHD API data retrieval
+│   ├── data_fetcher.py               # EODHD / FMP unified data retrieval
+│   ├── fmp_data_fetcher.py           # FMP-specific data utilities
+│   ├── earnings_date_validator.py    # Earnings date cross-check utilities
+│   ├── news_fetcher.py               # Earnings news enrichment
 │   ├── data_filter.py                # Earnings and technical filters
 │   ├── trade_executor.py             # Trade execution simulation
 │   ├── risk_manager.py               # Risk management system
@@ -65,6 +73,7 @@ earnings-trade-backtest/
 │   └── main.py                       # Modular main execution
 ├── tests/                            # Comprehensive test suite
 ├── reports/                          # Generated analysis reports (after execution)
+├── scripts/                          # Standalone analysis / debug scripts
 ├── docs/                             # Documentation and screenshots
 ├── main.py                          # Main entry point (recommended)
 ├── README.md                        # This file
