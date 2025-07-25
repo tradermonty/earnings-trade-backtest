@@ -16,11 +16,18 @@ class BacktestConfig:
     risk_limit: float = 6
     partial_profit: bool = True
     sp500_only: bool = False
-    mid_small_only: bool = False
+    mid_small_only: bool = False  # デフォルトで全銘柄を対象とする
     language: str = 'en'
-    pre_earnings_change: float = -10
+    pre_earnings_change: float = 0
     margin_ratio: float = 1.5
     target_symbols: Optional[Set[str]] = None
+    enable_earnings_date_validation: bool = False
+    use_fmp_data: bool = True  # デフォルトでFMPを使用
+    
+    # 時価総額ベースフィルタリング設定
+    use_market_cap_filter: bool = False  # デフォルトで時価総額フィルタリングを無効化
+    min_market_cap: float = 1e9  # 最小時価総額 ($1B)
+    max_market_cap: float = 50e9  # 最大時価総額 ($50B)
 
 
 class ThemeConfig:

@@ -5,18 +5,33 @@ from typing import Dict, List, Any, Optional, Set
 from tqdm import tqdm
 
 from .data_fetcher import DataFetcher
+from .earnings_date_validator import EarningsDateValidator
+from .news_fetcher import NewsFetcher
 
 
 class DataFilter:
     """データフィルタリングクラス"""
     
     def __init__(self, data_fetcher: DataFetcher, target_symbols: Optional[Set[str]] = None, 
-                 pre_earnings_change: float = -10, max_holding_days: int = 90):
+                 pre_earnings_change: float = -10, max_holding_days: int = 90,
+                 enable_date_validation: bool = False, api_key: str = None):
         """DataFilterの初期化"""
         self.data_fetcher = data_fetcher
         self.target_symbols = target_symbols
         self.pre_earnings_change = pre_earnings_change
         self.max_holding_days = max_holding_days
+        self.enable_date_validation = enable_date_validation
+        
+        # 決算日検証機能の初期化
+        self.earnings_validator = None
+        if enable_date_validation and api_key:
+            try:
+                news_fetcher = NewsFetcher(api_key)
+                self.earnings_validator = EarningsDateValidator(news_fetcher)
+                print("決算日検証機能が有効化されました")
+            except Exception as e:
+                print(f"決算日検証機能の初期化に失敗: {e}")
+                self.enable_date_validation = False
     
     def determine_trade_date(self, report_date: str, market_timing: str) -> str:
         """決算発表タイミングに基づいてトレード日を決定"""
@@ -116,9 +131,12 @@ class DataFilter:
         # tqdmを使用してプログレスバーを表示
         for earning in tqdm(first_filtered, desc="第2段階フィルタリング"):
             try:
-                market_timing = earning.get('before_after_market')
+                # 決算日の検証（有効化されている場合）
+                validated_earning = self._validate_and_adjust_earnings_date(earning)
+                
+                market_timing = validated_earning.get('before_after_market')
                 trade_date = self.determine_trade_date(
-                    earning['report_date'], 
+                    validated_earning['report_date'], 
                     market_timing
                 )
                 
@@ -159,15 +177,15 @@ class DataFilter:
                     skipped_count += 1
                     continue
 
-                # トレード日のデータを取得（ギャップアップ検証強化版）
-                trade_result = self._get_trade_date_data_with_validation(
-                    stock_data, trade_date, symbol, earning
+                # トレード日のデータを取得
+                trade_result = self._get_trade_date_data(
+                    stock_data, trade_date, symbol
                 )
                 if trade_result is None:
                     skipped_count += 1
                     continue
                 
-                trade_date_data, prev_day_data, gap, actual_trade_date = trade_result
+                trade_date_data, prev_day_data, gap = trade_result
 
                 # 平均出来高を計算
                 avg_volume = stock_data['Volume'].tail(20).mean()
@@ -181,11 +199,11 @@ class DataFilter:
                     skipped_count += 1
                     continue
                 
-                # データを保存（実際のトレード日を使用）
+                # データを保存
                 stock_info = {
                     'code': symbol,
                     'report_date': earning['report_date'],
-                    'trade_date': actual_trade_date,  # 検証後の実際のトレード日
+                    'trade_date': trade_date,
                     'price': trade_date_data['Open'],
                     'entry_price': trade_date_data['Open'],
                     'prev_close': prev_day_data['Close'],
@@ -195,7 +213,7 @@ class DataFilter:
                     'percent': float(earning['percent'])
                 }
                 
-                date_stocks[actual_trade_date].append(stock_info)
+                date_stocks[trade_date].append(stock_info)
                 processed_count += 1
                 tqdm.write("→ 条件適合")
                 
@@ -279,83 +297,43 @@ class DataFilter:
         
         return selected_stocks
     
-    def _get_trade_date_data_with_validation(self, stock_data: pd.DataFrame, trade_date: str, 
-                                            symbol: str, earning: Dict) -> Optional[tuple]:
-        """
-        トレード日のデータを取得し、ギャップアップを検証
-        EODHDの決算日の問題を考慮し、決算日の翌日と2日後まで検証対象とし、
-        最適なギャップアップ日を自動選択する
-        """
+    def _validate_and_adjust_earnings_date(self, earning: Dict) -> Dict:
+        """決算日を検証し、必要に応じて調整"""
+        if not self.enable_date_validation or not self.earnings_validator:
+            return earning
+        
         try:
-            report_date = earning.get('report_date')
+            symbol = earning['code'][:-3]  # .USを除去
             
-            # EODHDの日付ずれ問題対策：決算日の翌日と2日後をチェック
-            # （EODHDの決算日が実際より1日早い可能性があるため）
+            # 決算日を検証
+            validation_result = self.earnings_validator.validate_earnings_date(
+                symbol, 
+                earning['report_date']
+            )
             
-            # まずEODHDが示すトレード日を確認
-            if trade_date not in stock_data.index:
-                tqdm.write(f"- トレード日 {trade_date} のデータなし")
-                return None
+            # 信頼度が一定以上の場合は決算日を調整
+            confidence_threshold = 0.6
+            if validation_result['confidence'] >= confidence_threshold:
+                if validation_result['date_changed']:
+                    tqdm.write(f"- 決算日調整: {earning['report_date']} → {validation_result['actual_date']} (信頼度: {validation_result['confidence']:.2f})")
+                    
+                    # 元の日付を保存
+                    earning_copy = earning.copy()
+                    earning_copy['original_report_date'] = earning['report_date']
+                    earning_copy['report_date'] = validation_result['actual_date']
+                    earning_copy['date_validation'] = validation_result
+                    
+                    return earning_copy
+                else:
+                    tqdm.write(f"- 決算日確認: {earning['report_date']} (信頼度: {validation_result['confidence']:.2f})")
+            else:
+                tqdm.write(f"- 決算日検証: 信頼度不足 ({validation_result['confidence']:.2f}), EODHDの日付を使用")
             
-            trade_date_idx = stock_data.index.get_loc(trade_date)
-            
-            # 最大2日先まで検証
-            best_trade_data = None
-            best_prev_data = None
-            best_gap = -100.0  # 最小値で初期化
-            best_trade_date = None
-            best_day_offset = 0
-            
-            for day_offset in range(1, 3):  # 1日後と2日後をチェック
-                # 検証日が存在しない場合はスキップ
-                if trade_date_idx + day_offset >= len(stock_data):
-                    continue
-                
-                # 検証日のデータを取得
-                check_day_data = stock_data.iloc[trade_date_idx + day_offset]
-                check_date = check_day_data.name.strftime('%Y-%m-%d')
-                
-                # 前営業日のデータ（ギャップ計算の基準日）
-                prev_day_data = stock_data.iloc[trade_date_idx + day_offset - 1]
-                
-                # ギャップ率を計算
-                gap = ((check_day_data['Open'] - prev_day_data['Close']) / 
-                       prev_day_data['Close']) * 100
-                
-                # 出来高の増加をチェック
-                volume_increase = check_day_data['Volume'] / prev_day_data['Volume']
-                
-                tqdm.write(f"- EODHD決算日: {report_date}, 検証日{day_offset}: {check_date}")
-                tqdm.write(f"  → ギャップ: {gap:.1f}%, 出来高増加: {volume_increase:.1f}倍")
-                
-                # ギャップが2%以上かつ出来高が1.2倍以上の場合、候補として保存
-                if gap >= 2.0 and volume_increase >= 1.2:
-                    # より良いギャップの日を選択
-                    if gap > best_gap:
-                        best_trade_data = check_day_data
-                        best_prev_data = prev_day_data
-                        best_gap = gap
-                        best_trade_date = check_date
-                        best_day_offset = day_offset
-            
-            # 条件を満たす日が見つかった場合
-            if best_trade_data is not None:
-                tqdm.write(f"  → 最適な検証日: {best_trade_date} (決算日+{best_day_offset}日)")
-                return best_trade_data, best_prev_data, best_gap, best_trade_date
-            
-            # 条件を満たす日がない場合、最もギャップの大きい日を返す（後でフィルタされる）
-            # 1日後のデータを返す（従来の動作と同じ）
-            if trade_date_idx + 1 < len(stock_data):
-                actual_trade_day_data = stock_data.iloc[trade_date_idx + 1]
-                actual_trade_date = actual_trade_day_data.name.strftime('%Y-%m-%d')
-                reported_day_data = stock_data.iloc[trade_date_idx]
-                gap = ((actual_trade_day_data['Open'] - reported_day_data['Close']) / 
-                       reported_day_data['Close']) * 100
-                return actual_trade_day_data, reported_day_data, gap, actual_trade_date
-            
-            tqdm.write("- スキップ: 検証可能な日のデータなし")
-            return None
+            # 検証結果を記録（調整しない場合も）
+            earning_copy = earning.copy()
+            earning_copy['date_validation'] = validation_result
+            return earning_copy
             
         except Exception as e:
-            tqdm.write(f"- エラー: {str(e)}")
-            return None
+            tqdm.write(f"- 決算日検証エラー: {e}")
+            return earning

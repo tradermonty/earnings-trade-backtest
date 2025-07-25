@@ -2,14 +2,15 @@
 
 *他の言語で読む: [English](README.md), [日本語](README_ja.md)*
 
-決算サプライズを利用したスイングトレード戦略のバックテストシステム。中小型株に特化し、EODHD APIを使用してリアルタイムデータに基づく取引シミュレーションを実行します。
+決算サプライズを利用したスイングトレード戦略のバックテストシステム。中小型株に特化し、EODHD API（アドバンストプラン）または FinancialModelingPrep (FMP) API（スタータープラン）を使用してリアルタイムデータに基づく取引シミュレーションを実行します。
 
 ## 🚀 クイックスタート
 
 ### 前提条件
 
 - Python 3.11以上
-- [EODHD API](https://eodhistoricaldata.com/)のAPIキー
+- [EODHD API](https://eodhistoricaldata.com/)のAPIキー（アドバンストプラン、推奨）
+- （任意）[FinancialModelingPrep API](https://site.financialmodelingprep.com/)（FMP）のAPIキー — スタータープラン対応
 
 ### インストール
 
@@ -30,10 +31,14 @@ pip install -r requirements.txt
 
 ### 環境設定
 
-`.env` ファイルを作成してAPIキーを設定：
+`.env` ファイルを作成してAPIキーを設定（複数可）：
 
 ```env
-EODHD_API_KEY=your_api_key_here
+# EODHD（アドバンストプラン）
+EODHD_API_KEY=your_eodhd_api_key
+
+# FMP（スタータープラン）※任意
+FMP_API_KEY=your_fmp_api_key
 ```
 
 ### 基本的な実行
@@ -54,7 +59,10 @@ python main.py --help
 ```
 earnings-trade-backtest/
 ├── src/                           # コアソースコードモジュール
-│   ├── data_fetcher.py           # EODHD APIデータ取得
+│   ├── data_fetcher.py           # EODHD / FMP データ取得
+│   ├── fmp_data_fetcher.py       # FMP専用データユーティリティ
+│   ├── earnings_date_validator.py # 決算日クロスチェックユーティリティ
+│   ├── news_fetcher.py           # 決算ニュース取得
 │   ├── data_filter.py            # 決算・技術的フィルター
 │   ├── trade_executor.py         # 取引実行シミュレーション
 │   ├── risk_manager.py           # リスク管理システム
@@ -64,6 +72,7 @@ earnings-trade-backtest/
 │   ├── config.py                 # 設定管理
 │   └── main.py                   # モジュール式メイン実行
 ├── tests/                         # 包括的テストスイート
+├── scripts/                       # 分析／デバッグ用スクリプト
 ├── reports/                       # 生成された分析レポート（実行後）
 ├── docs/                          # ドキュメント・スクリーンショット
 ├── main.py                        # メインエントリーポイント（推奨）

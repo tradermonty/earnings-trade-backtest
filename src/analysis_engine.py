@@ -3,9 +3,7 @@
 """
 
 import pandas as pd
-import numpy as np
 import plotly.graph_objs as go
-from plotly.offline import plot
 from typing import List, Dict, Any, Optional
 from collections import defaultdict
 from datetime import datetime, timedelta

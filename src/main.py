@@ -40,7 +40,10 @@ class EarningsBacktest:
     def _initialize_components(self):
         """各コンポーネントの初期化"""
         # データ取得コンポーネント
-        self.data_fetcher = DataFetcher()
+        self.data_fetcher = DataFetcher(use_fmp=self.config.use_fmp_data)
+        
+        # API keyをデータフェッチャーから取得
+        self.api_key = self.data_fetcher.api_key
         
         # 銘柄リストの取得
         target_symbols = self._get_target_symbols()
@@ -50,7 +53,9 @@ class EarningsBacktest:
             data_fetcher=self.data_fetcher,
             target_symbols=target_symbols,
             pre_earnings_change=self.config.pre_earnings_change,
-            max_holding_days=self.config.max_holding_days
+            max_holding_days=self.config.max_holding_days,
+            enable_date_validation=self.config.enable_earnings_date_validation,
+            api_key=self.api_key
         )
         
         # リスク管理コンポーネント
@@ -94,7 +99,11 @@ class EarningsBacktest:
                 symbols.update(sp500_symbols)
         
         if self.config.mid_small_only:
-            mid_small_symbols = self.data_fetcher.get_mid_small_symbols()
+            mid_small_symbols = self.data_fetcher.get_mid_small_symbols(
+                use_market_cap_filter=self.config.use_market_cap_filter,
+                min_market_cap=self.config.min_market_cap,
+                max_market_cap=self.config.max_market_cap
+            )
             if mid_small_symbols:
                 symbols.update(mid_small_symbols)
         
@@ -214,23 +223,6 @@ class EarningsBacktest:
         """多言語対応テキストを取得"""
         return TextConfig.get_text(key, self.config.language)
     
-    def analyze_performance(self) -> Dict[str, Any]:
-        """パフォーマンス分析の実行"""
-        if not self.trades:
-            print("分析するトレードデータがありません。")
-            return {}
-        
-        print("\n詳細パフォーマンス分析を実行中...")
-        
-        # 基本的な分析結果は既にmetricsに含まれている
-        analysis = {
-            'basic_metrics': self.metrics,
-            'daily_positions': self.metrics_calculator.calculate_daily_positions(self.trades)
-        }
-        
-        # 追加の分析を実行する場合はここに追加
-        
-        return analysis
 
 
 def create_backtest_from_args(args) -> EarningsBacktest:
@@ -247,10 +239,17 @@ def create_backtest_from_args(args) -> EarningsBacktest:
         risk_limit=args.risk_limit,
         partial_profit=not args.no_partial_profit,
         sp500_only=args.sp500_only,
-        mid_small_only=not args.no_mid_small_only if not args.sp500_only else False,
+        mid_small_only=getattr(args, 'mid_small_only', False) if not args.sp500_only else False,
         language=args.language,
         pre_earnings_change=args.pre_earnings_change,
-        margin_ratio=args.margin_ratio
+        margin_ratio=args.margin_ratio,
+        enable_earnings_date_validation=args.enable_date_validation,
+        # データソース設定: デフォルトはFMP、--use_eodhd指定時のみEODHD
+        use_fmp_data=not getattr(args, 'use_eodhd', False),
+        # 時価総額フィルター設定: デフォルトは無効、--use_market_cap_filter指定時のみ有効
+        use_market_cap_filter=getattr(args, 'use_market_cap_filter', False),
+        min_market_cap=args.min_market_cap * 1e9,  # Convert billions to actual value
+        max_market_cap=args.max_market_cap * 1e9   # Convert billions to actual value
     )
     
     return EarningsBacktest(config)
