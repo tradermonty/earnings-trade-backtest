@@ -15,8 +15,9 @@ class DataFetcher:
     
     def __init__(self, api_key: Optional[str] = None, use_fmp: bool = False):
         """DataFetcherの初期化"""
-        self.api_key = api_key or self._load_api_key()
         self.use_fmp = use_fmp
+        self.fmp_fetcher = None  # 初期化
+        self.api_key = api_key or self._load_api_key()
         
         # FMP Data Fetcherの初期化
         if self.use_fmp:
@@ -35,7 +36,18 @@ class DataFetcher:
         load_dotenv()
         api_key = os.getenv('EODHD_API_KEY')
         if not api_key:
-            raise ValueError(".envファイルにEODHD_API_KEYが設定されていません")
+            if self.use_fmp:
+                # FMPを使用する場合はEODHDキーは必須ではない
+                logging.info("EODHD_API_KEY not found, but FMP is available as primary data source")
+                return ""  # 空文字列を返してエラーを回避
+            else:
+                # FMPAPIキーがあるかも確認
+                fmp_key = os.getenv('FMP_API_KEY')
+                if fmp_key:
+                    logging.info("EODHD_API_KEY not found, but FMP_API_KEY is available")
+                    return ""  # 空文字列を返してエラーを回避
+                else:
+                    raise ValueError(".envファイルにEODHD_API_KEYまたはFMP_API_KEYが設定されていません")
         return api_key
     
     def get_sp500_symbols(self) -> List[str]:
@@ -102,41 +114,45 @@ class DataFetcher:
             except Exception as e:
                 logging.warning(f"FMP中型・小型株データ取得失敗: {e}")
         
-        # EODHD or fallback
-        try:
-            # S&P 400 (MID)の取得
-            mid_url = f"https://eodhd.com/api/fundamentals/MID.INDX?api_token={self.api_key}&fmt=json"
-            mid_response = requests.get(mid_url)
-            mid_response.raise_for_status()
-            mid_data = mid_response.json()
-            
-            # S&P 600 (SML)の取得
-            sml_url = f"https://eodhd.com/api/fundamentals/SML.INDX?api_token={self.api_key}&fmt=json"
-            sml_response = requests.get(sml_url)
-            sml_response.raise_for_status()
-            sml_data = sml_response.json()
-            
-            # 構成銘柄の抽出と結合
-            symbols = []
-            
-            # MIDの構成銘柄を追加
-            if 'Components' in mid_data:
-                for component in mid_data['Components'].values():
-                    symbols.append(component['Code'])
-                    
-            # SMLの構成銘柄を追加
-            if 'Components' in sml_data:
-                for component in sml_data['Components'].values():
-                    symbols.append(component['Code'])
-            
-            if not symbols:
-                raise ValueError("中型・小型株の銘柄リストを取得できませんでした")
+        # EODHD or fallback (only if API key is available)
+        if self.api_key:  # EODHDキーが利用可能な場合のみ実行
+            try:
+                # S&P 400 (MID)の取得
+                mid_url = f"https://eodhd.com/api/fundamentals/MID.INDX?api_token={self.api_key}&fmt=json"
+                mid_response = requests.get(mid_url)
+                mid_response.raise_for_status()
+                mid_data = mid_response.json()
                 
-            logging.info(f"EODHDから取得した中型・小型株銘柄数: {len(symbols)}")
-            return symbols
-            
-        except Exception as e:
-            logging.error(f"中型・小型株銘柄リストの取得に失敗: {str(e)}")
+                # S&P 600 (SML)の取得
+                sml_url = f"https://eodhd.com/api/fundamentals/SML.INDX?api_token={self.api_key}&fmt=json"
+                sml_response = requests.get(sml_url)
+                sml_response.raise_for_status()
+                sml_data = sml_response.json()
+                
+                # 構成銘柄の抽出と結合
+                symbols = []
+                
+                # MIDの構成銘柄を追加
+                if 'Components' in mid_data:
+                    for component in mid_data['Components'].values():
+                        symbols.append(component['Code'])
+                        
+                # SMLの構成銘柄を追加
+                if 'Components' in sml_data:
+                    for component in sml_data['Components'].values():
+                        symbols.append(component['Code'])
+                
+                if not symbols:
+                    raise ValueError("中型・小型株の銘柄リストを取得できませんでした")
+                    
+                logging.info(f"EODHDから取得した中型・小型株銘柄数: {len(symbols)}")
+                return symbols
+                
+            except Exception as e:
+                logging.error(f"中型・小型株銘柄リストの取得に失敗: {str(e)}")
+                return []
+        else:
+            logging.info("EODHD APIキーが設定されていないため中型・小型株データをスキップします")
             return []
 
     def get_earnings_data(self, start_date: str, end_date: str) -> Dict[str, Any]:
@@ -172,6 +188,17 @@ class DataFetcher:
             print(f"FMP決算データ取得完了: {len(earnings_list)}件")
             return {'earnings': earnings_list}
             
+        except ValueError as e:
+            # FMP日付制限エラーの場合は詳細なエラーメッセージを表示
+            if "2020-08-01" in str(e):
+                print(f"\n{str(e)}")
+                print("\nEODHDデータソースに自動的に切り替えます...")
+                print("注意: EODHDは決算日精度が低い（44%）ですが、長期間の分析が可能です\n")
+                return self._get_earnings_data_eodhd(start_date, end_date)
+            else:
+                print(f"FMP決算データの取得中にエラーが発生: {str(e)}")
+                print("EODHDにフォールバックします...")
+                return self._get_earnings_data_eodhd(start_date, end_date)
         except Exception as e:
             print(f"FMP決算データの取得中にエラーが発生: {str(e)}")
             print("EODHDにフォールバックします...")
@@ -179,6 +206,10 @@ class DataFetcher:
     
     def _get_earnings_data_eodhd(self, start_date: str, end_date: str) -> Dict[str, Any]:
         """EODHDから決算データを取得。長期間のデータは5年ごとに分割して取得"""
+        if not self.api_key:
+            print("EODHD APIキーが設定されていません。FMP_API_KEYを設定してください。")
+            return {'earnings': []}
+        
         try:
             # 開始日と終了日をdatetime型に変換
             start = pd.to_datetime(start_date)
@@ -212,8 +243,8 @@ class DataFetcher:
                 # 次の期間の開始日を設定
                 current_start = current_end + pd.Timedelta(days=1)
                 
-                # APIレート制限を考慮して少し待機
-                time.sleep(0.1)
+                # EODHDレート制限対策（最小限に）
+                time.sleep(0.05)
             
             # 全期間のデータを結合
             combined_data = {'earnings': all_earnings}
@@ -271,7 +302,11 @@ class DataFetcher:
             except Exception as e:
                 logging.warning(f"FMP株価データ取得エラー ({symbol}): {e}")
         
-        # EODHD fallback
+        # EODHD fallback (only if API key is available)
+        if not self.api_key:
+            logging.warning(f"EODHD APIキーが設定されていないため、{symbol}の株価データを取得できません")
+            return None
+            
         try:
             api_symbol = symbol.replace('.', '-')
             
@@ -307,8 +342,8 @@ class DataFetcher:
                 # 次の期間の開始日を設定
                 current_start = current_end + pd.Timedelta(days=1)
                 
-                # APIレート制限を考慮して少し待機
-                time.sleep(0.1)
+                # EODHDレート制限対策（最小限に）
+                time.sleep(0.05)
             
             if not all_data:
                 logging.warning(f"データが見つかりません: {symbol}")
@@ -347,7 +382,11 @@ class DataFetcher:
             except Exception as e:
                 logging.warning(f"FMP企業データ取得エラー ({symbol}): {e}")
         
-        # EODHD fallback
+        # EODHD fallback (only if API key is available)
+        if not self.api_key:
+            logging.warning(f"EODHD APIキーが設定されていないため、{symbol}のファンダメンタルデータを取得できません")
+            return None
+            
         try:
             api_symbol = symbol.replace('.', '-')
             url = f"https://eodhd.com/api/fundamentals/{api_symbol}"

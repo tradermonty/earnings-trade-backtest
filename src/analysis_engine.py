@@ -82,6 +82,14 @@ class AnalysisEngine:
         ma50_chart = self._create_ma50_analysis_chart(trades_with_sector)
         analysis_charts['ma50_analysis'] = ma50_chart
         
+        # 12. 時価総額別パフォーマンス分析
+        market_cap_chart = self._create_market_cap_performance_chart(trades_with_sector)
+        analysis_charts['market_cap_performance'] = market_cap_chart
+        
+        # 13. 価格帯別パフォーマンス分析
+        price_range_chart = self._create_price_range_performance_chart(trades_with_sector)
+        analysis_charts['price_range_performance'] = price_range_chart
+        
         return analysis_charts
     
     def _add_sector_info(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -1332,3 +1340,220 @@ class AnalysisEngine:
         )
         
         return fig.to_html(include_plotlyjs='cdn', div_id="ma50-analysis-chart")
+    
+    def _create_market_cap_performance_chart(self, df: pd.DataFrame) -> str:
+        """時価総額別パフォーマンス分析チャート"""
+        if 'market_cap_category' not in df.columns:
+            return "<p>時価総額データが利用できません</p>"
+        
+        # 時価総額カテゴリの順序を定義
+        cap_order = [
+            "Mega Cap ($200B+)",
+            "Large Cap ($10B-$200B)", 
+            "Mid Cap ($2B-$10B)",
+            "Small Cap ($300M-$2B)",
+            "Micro Cap (<$300M)"
+        ]
+        
+        # データを集計
+        market_cap_stats = []
+        for cap_category in cap_order:
+            cap_trades = df[df['market_cap_category'] == cap_category]
+            if len(cap_trades) > 0:
+                win_rate = (cap_trades['pnl'] > 0).mean() * 100
+                avg_return = cap_trades['pnl_rate'].mean()
+                total_trades = len(cap_trades)
+                total_pnl = cap_trades['pnl'].sum()
+                
+                market_cap_stats.append({
+                    'category': cap_category,
+                    'win_rate': win_rate,
+                    'avg_return': avg_return,
+                    'total_trades': total_trades,
+                    'total_pnl': total_pnl
+                })
+        
+        if not market_cap_stats:
+            return "<p>時価総額データが不足しています</p>"
+        
+        categories = [stat['category'] for stat in market_cap_stats]
+        win_rates = [stat['win_rate'] for stat in market_cap_stats]
+        avg_returns = [stat['avg_return'] for stat in market_cap_stats]
+        total_trades = [stat['total_trades'] for stat in market_cap_stats]
+        
+        # サブプロット作成
+        from plotly.subplots import make_subplots
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=('勝率 (%)', '平均リターン (%)', 'トレード数', '総損益 ($)'),
+            specs=[[{"type": "bar"}, {"type": "bar"}],
+                   [{"type": "bar"}, {"type": "bar"}]]
+        )
+        
+        # 勝率
+        fig.add_trace(go.Bar(
+            x=categories, y=win_rates,
+            name='勝率', 
+            marker_color=self.theme['primary_color'],
+            text=[f'{rate:.1f}%' for rate in win_rates],
+            textposition='auto'
+        ), row=1, col=1)
+        
+        # 平均リターン
+        colors = ['green' if ret > 0 else 'red' for ret in avg_returns]
+        fig.add_trace(go.Bar(
+            x=categories, y=avg_returns,
+            name='平均リターン',
+            marker_color=colors,
+            text=[f'{ret:.1f}%' for ret in avg_returns],
+            textposition='auto'
+        ), row=1, col=2)
+        
+        # トレード数
+        fig.add_trace(go.Bar(
+            x=categories, y=total_trades,
+            name='トレード数',
+            marker_color=self.theme['secondary_color'],
+            text=total_trades,
+            textposition='auto'
+        ), row=2, col=1)
+        
+        # 総損益
+        total_pnls = [stat['total_pnl'] for stat in market_cap_stats]
+        pnl_colors = ['green' if pnl > 0 else 'red' for pnl in total_pnls]
+        fig.add_trace(go.Bar(
+            x=categories, y=total_pnls,
+            name='総損益',
+            marker_color=pnl_colors,
+            text=[f'${pnl:,.0f}' for pnl in total_pnls],
+            textposition='auto'
+        ), row=2, col=2)
+        
+        fig.update_layout(
+            title_text="時価総額別パフォーマンス分析",
+            showlegend=False,
+            paper_bgcolor=self.theme['bg_color'],
+            plot_bgcolor=self.theme['plot_bg_color'],
+            font=dict(color=self.theme['text_color']),
+            height=800
+        )
+        
+        # X軸ラベルを45度回転
+        fig.update_xaxes(tickangle=45, tickfont=dict(color=self.theme['text_color']))
+        fig.update_yaxes(tickfont=dict(color=self.theme['text_color']))
+        
+        return fig.to_html(include_plotlyjs='cdn', div_id="market-cap-performance-chart")
+    
+    def _create_price_range_performance_chart(self, df: pd.DataFrame) -> str:
+        """価格帯別パフォーマンス分析チャート"""
+        if 'price_range_category' not in df.columns:
+            return "<p>価格帯データが利用できません</p>"
+        
+        # 価格帯カテゴリの順序を定義
+        price_order = [
+            "高価格帯 (>$100)",
+            "中価格帯 ($30-100)",
+            "低価格帯 (<$30)"
+        ]
+        
+        # データを集計 
+        price_stats = []
+        for price_category in price_order:
+            price_trades = df[df['price_range_category'] == price_category]
+            if len(price_trades) > 0:
+                win_rate = (price_trades['pnl'] > 0).mean() * 100
+                avg_return = price_trades['pnl_rate'].mean()
+                total_trades = len(price_trades)
+                total_pnl = price_trades['pnl'].sum()
+                avg_holding_days = price_trades['holding_period'].mean()
+                
+                price_stats.append({
+                    'category': price_category,
+                    'win_rate': win_rate,
+                    'avg_return': avg_return,
+                    'total_trades': total_trades,
+                    'total_pnl': total_pnl,
+                    'avg_holding_days': avg_holding_days
+                })
+        
+        if not price_stats:
+            return "<p>価格帯データが不足しています</p>"
+        
+        categories = [stat['category'] for stat in price_stats]
+        win_rates = [stat['win_rate'] for stat in price_stats]
+        avg_returns = [stat['avg_return'] for stat in price_stats]
+        total_trades = [stat['total_trades'] for stat in price_stats]
+        avg_holding = [stat['avg_holding_days'] for stat in price_stats]
+        
+        # サブプロット作成
+        from plotly.subplots import make_subplots
+        fig = make_subplots(
+            rows=2, cols=3,
+            subplot_titles=('勝率 (%)', '平均リターン (%)', 'トレード数', 
+                          '総損益 ($)', '平均保有日数', ''),
+            specs=[[{"type": "bar"}, {"type": "bar"}, {"type": "bar"}],
+                   [{"type": "bar"}, {"type": "bar"}, {"type": "xy"}]]
+        )
+        
+        # 勝率
+        fig.add_trace(go.Bar(
+            x=categories, y=win_rates,
+            name='勝率',
+            marker_color=self.theme['primary_color'],
+            text=[f'{rate:.1f}%' for rate in win_rates],
+            textposition='auto'
+        ), row=1, col=1)
+        
+        # 平均リターン
+        colors = ['green' if ret > 0 else 'red' for ret in avg_returns]
+        fig.add_trace(go.Bar(
+            x=categories, y=avg_returns,
+            name='平均リターン',
+            marker_color=colors,
+            text=[f'{ret:.1f}%' for ret in avg_returns],
+            textposition='auto'
+        ), row=1, col=2)
+        
+        # トレード数
+        fig.add_trace(go.Bar(
+            x=categories, y=total_trades,
+            name='トレード数',
+            marker_color=self.theme['secondary_color'],
+            text=total_trades,
+            textposition='auto'
+        ), row=1, col=3)
+        
+        # 総損益
+        total_pnls = [stat['total_pnl'] for stat in price_stats]
+        pnl_colors = ['green' if pnl > 0 else 'red' for pnl in total_pnls]
+        fig.add_trace(go.Bar(
+            x=categories, y=total_pnls,
+            name='総損益',
+            marker_color=pnl_colors,
+            text=[f'${pnl:,.0f}' for pnl in total_pnls],
+            textposition='auto'
+        ), row=2, col=1)
+        
+        # 平均保有日数
+        fig.add_trace(go.Bar(
+            x=categories, y=avg_holding,
+            name='平均保有日数',
+            marker_color=self.theme['accent_color'],
+            text=[f'{days:.1f}日' for days in avg_holding],
+            textposition='auto'
+        ), row=2, col=2)
+        
+        fig.update_layout(
+            title_text="価格帯別パフォーマンス分析",
+            showlegend=False,
+            paper_bgcolor=self.theme['bg_color'],
+            plot_bgcolor=self.theme['plot_bg_color'],
+            font=dict(color=self.theme['text_color']),
+            height=800
+        )
+        
+        # X軸ラベルを回転
+        fig.update_xaxes(tickangle=15, tickfont=dict(color=self.theme['text_color']))
+        fig.update_yaxes(tickfont=dict(color=self.theme['text_color']))
+        
+        return fig.to_html(include_plotlyjs='cdn', div_id="price-range-performance-chart")
