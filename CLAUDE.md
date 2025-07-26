@@ -124,6 +124,19 @@ The system generates:
 - Console output with detailed trade logs
 - HTML report file with interactive charts (opens automatically in browser)
 
+## Data Source Limitations
+
+### FMP (Financial Modeling Prep)
+- **Historical Data Limit**: Premium plan ($14/month) only provides earnings calendar data from **August 2020 onwards**
+- Despite advertising "30+ years" of historical data, earnings calendar access is limited to ~4 years
+- Attempts to backtest before 2020-08-01 will return 402 (Payment Required) errors
+- For backtests requiring data before August 2020, use EODHD as the data source
+
+### EODHD  
+- Provides historical earnings data back to 2015 or earlier
+- Lower earnings date accuracy (44%) compared to FMP (90%+)
+- Recommended for long-term historical analysis despite accuracy trade-offs
+
 ## Notes
 
 - The system defaults to targeting mid/small cap stocks (S&P 400/600)

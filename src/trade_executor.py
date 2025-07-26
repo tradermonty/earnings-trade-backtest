@@ -2,6 +2,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from tqdm import tqdm
+import logging
 
 from .data_fetcher import DataFetcher
 from .risk_manager import RiskManager
@@ -36,6 +37,58 @@ class TradeExecutor:
         self.active_positions = []  # 現在のアクティブポジション
         self.start_date = None
         self.end_date = None
+    
+    def classify_market_cap(self, symbol: str, price: float) -> str:
+        """時価総額区分を分類"""
+        try:
+            # FMPから企業情報を取得して時価総額を計算
+            if hasattr(self.data_fetcher, 'fmp_fetcher') and self.data_fetcher.fmp_fetcher:
+                profile = self.data_fetcher.fmp_fetcher.get_company_profile(symbol)
+                if profile and isinstance(profile, list) and len(profile) > 0:
+                    company_data = profile[0]
+                    market_cap = company_data.get('mktCap')
+                    if market_cap and market_cap > 0:
+                        if market_cap >= 200e9:  # $200B+
+                            return "Mega Cap ($200B+)"
+                        elif market_cap >= 10e9:  # $10B-$200B
+                            return "Large Cap ($10B-$200B)"
+                        elif market_cap >= 2e9:   # $2B-$10B
+                            return "Mid Cap ($2B-$10B)"
+                        elif market_cap >= 300e6: # $300M-$2B
+                            return "Small Cap ($300M-$2B)"
+                        else:
+                            return "Micro Cap (<$300M)"
+            
+            # フォールバック: 株価ベースの推定分類
+            if price >= 200:
+                return "Mega Cap ($200B+)"
+            elif price >= 50:
+                return "Large Cap ($10B-$200B)"
+            elif price >= 15:
+                return "Mid Cap ($2B-$10B)"
+            else:
+                return "Small Cap ($300M-$2B)"
+                
+        except Exception as e:
+            logging.warning(f"Market cap classification failed for {symbol}: {e}")
+            # エラー時は価格ベースの推定
+            if price >= 200:
+                return "Mega Cap ($200B+)"
+            elif price >= 50:
+                return "Large Cap ($10B-$200B)"
+            elif price >= 15:
+                return "Mid Cap ($2B-$10B)"
+            else:
+                return "Small Cap ($300M-$2B)"
+    
+    def classify_price_range(self, price: float) -> str:
+        """価格帯区分を分類"""
+        if price >= 100:
+            return "高価格帯 (>$100)"
+        elif price >= 30:
+            return "中価格帯 ($30-100)"
+        else:
+            return "低価格帯 (<$30)"
     
     def execute_backtest(self, trade_candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """バックテストの実行"""
@@ -249,7 +302,9 @@ class TradeExecutor:
                     'holding_period': 0,
                     'exit_reason': "stop_loss_intraday",
                     'gap': gap,
-                    'surprise_rate': surprise_rate
+                    'surprise_rate': surprise_rate,
+                    'market_cap_category': self.classify_market_cap(symbol, entry_price),
+                    'price_range_category': self.classify_price_range(entry_price)
                 }
                 
                 tqdm.write(f"- 当日ストップロス: ${exit_price:.2f}")
@@ -294,7 +349,9 @@ class TradeExecutor:
                         'shares': half_shares,
                         'pnl_rate': round(trade_pnl_rate_partial, 2),
                         'pnl': round(trade_pnl_partial, 2),
-                        'exit_reason': 'partial_profit'
+                        'exit_reason': 'partial_profit',
+                        'market_cap_category': self.classify_market_cap(symbol, entry_price),
+                        'price_range_category': self.classify_price_range(entry_price)
                     }
                     
                     tqdm.write(f"- 部分利確: ${exit_price_partial:.2f} x {half_shares}株")
@@ -378,7 +435,9 @@ class TradeExecutor:
                                  datetime.strptime(entry_date, "%Y-%m-%d")).days,
                 'exit_reason': exit_reason,
                 'gap': gap,
-                'surprise_rate': surprise_rate
+                'surprise_rate': surprise_rate,
+                'market_cap_category': self.classify_market_cap(symbol, entry_price),
+                'price_range_category': self.classify_price_range(entry_price)
             }
             
             tqdm.write(f"- 決済: ${exit_price:.2f} ({exit_reason})")

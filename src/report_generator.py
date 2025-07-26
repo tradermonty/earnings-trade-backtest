@@ -469,6 +469,28 @@ class ReportGenerator:
         </div>
             """)
         
+        # 時価総額別パフォーマンス分析
+        if 'market_cap_performance' in analysis_charts:
+            sections.append(f"""
+        <div class="section">
+            <h3>Market Cap Performance Analysis</h3>
+            <div class="chart-container">
+                {analysis_charts['market_cap_performance']}
+            </div>
+        </div>
+            """)
+        
+        # 価格帯別パフォーマンス分析
+        if 'price_range_performance' in analysis_charts:
+            sections.append(f"""
+        <div class="section">
+            <h3>Price Range Performance Analysis</h3>
+            <div class="chart-container">
+                {analysis_charts['price_range_performance']}
+            </div>
+        </div>
+            """)
+        
         # EPSサプライズ分析
         if 'eps_surprise' in analysis_charts:
             sections.append(f"""
