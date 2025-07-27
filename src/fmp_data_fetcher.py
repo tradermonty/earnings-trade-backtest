@@ -913,4 +913,79 @@ class FMPDataFetcher:
             'min_request_interval': self.min_request_interval
         }
 
+    def stock_screener(self, price_more_than: float = 10, market_cap_more_than: float = 1e9,
+                       market_cap_less_than: Optional[float] = None,
+                       volume_more_than: int = 200000, limit: int = 5000, exchange: Optional[str] = None) -> List[str]:
+        """指定条件でFMPストックスクリーナーを実行し、銘柄シンボルのリストを返す
+
+        Args:
+            price_more_than: 株価下限（デフォルト: $10）
+            market_cap_more_than: 時価総額下限（デフォルト: $1B）
+            volume_more_than: 平均出来高下限（デフォルト: 200,000株）
+            limit: 取得件数上限（デフォルト: 5000）
+            exchange: 取引所を限定する場合に指定（'NASDAQ' など）
+
+        Returns:
+            条件を満たす銘柄シンボルのリスト
+        """
+        logger.info(
+            f"Running stock screener (price >= ${price_more_than}, marketCap >= {market_cap_more_than}, "
+            f"volume >= {volume_more_than})")
+
+        params = {
+            'priceMoreThan': price_more_than,
+            'marketCapMoreThan': int(market_cap_more_than),
+            'volumeMoreThan': int(volume_more_than),
+            'limit': limit,
+            # 追加フィルタリング
+            'country': 'US',             # 米国企業のみ
+            'isEtf': 'false',            # ETF除外
+            'isFund': 'false',           # Fund除外
+            'isActivelyTrading': 'true', # 取引停止銘柄除外
+            'includeAllShareClasses': 'false'
+        }
+        if market_cap_less_than is not None and market_cap_less_than < 1e12:
+            params['marketCapLowerThan'] = int(market_cap_less_than)
+        if exchange:
+            params['exchange'] = exchange
+
+        # エンドポイント候補。Premium/stable と v3 で名称が異なることがある
+        endpoints = [
+            'company-screener',   # 推奨（stable）
+            'stock_screener',     # v3 の別名
+            'stock-screener',     # ハイフン形式
+            'screener'            # 古い形式
+        ]
+
+        data = None
+        for ep in endpoints:
+            data = self._make_request(ep, params)
+            if data is not None:
+                logger.debug(f"Stock screener succeeded with endpoint: {ep}")
+                break
+        if data is None:
+            logger.warning("Stock screener API not available or returned no data")
+            return []
+
+        symbols: List[str] = []
+        if isinstance(data, list):
+            for item in data:
+                symbol = item.get('symbol')
+                exch = item.get('exchangeShortName', '')
+                country = item.get('country', '')
+
+                # 米国市場を優先
+                if exchange:
+                    allowed_market = exch == exchange
+                else:
+                    allowed_market = exch in ['NASDAQ', 'NYSE', 'AMEX'] or country == 'US'
+
+                if symbol and allowed_market:
+                    # 特殊ティッカーを除外（例: BRK.A, BRK-B, ^SPX など）
+                    if not any(x in symbol for x in ['.', '-', '^', '=']):
+                        symbols.append(symbol)
+
+        logger.info(f"Stock screener retrieved {len(symbols)} symbols")
+        return symbols
+
 
