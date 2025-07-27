@@ -84,11 +84,11 @@ class TradeExecutor:
     def classify_price_range(self, price: float) -> str:
         """価格帯区分を分類"""
         if price >= 100:
-            return "高価格帯 (>$100)"
+            return "High Price (>$100)"
         elif price >= 30:
-            return "中価格帯 ($30-100)"
+            return "Mid Price ($30-100)"
         else:
-            return "低価格帯 (<$30)"
+            return "Low Price (<$30)"
     
     def execute_backtest(self, trade_candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """バックテストの実行"""

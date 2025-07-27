@@ -2,15 +2,16 @@
 
 *他の言語で読む: [English](README.md), [日本語](README_ja.md)*
 
-決算サプライズを利用したスイングトレード戦略のバックテストシステム。中小型株に特化し、EODHD API（アドバンストプラン）または FinancialModelingPrep (FMP) API（スタータープラン）を使用してリアルタイムデータに基づく取引シミュレーションを実行します。
+決算サプライズを利用したスイングトレード戦略のバックテストシステム。中小型株に特化し、当初EODHD APIで開発されていましたが、決算日の精度が低いため**FinancialModelingPrep (FMP) API**に移行しました。FMPは高精度なデータを提供しますが、Premiumプランでは過去約5年間の決算データしか取得できない制限があります。
 
 ## 🚀 クイックスタート
 
 ### 前提条件
 
 - Python 3.11以上
-- [EODHD API](https://eodhistoricaldata.com/)のAPIキー（アドバンストプラン、推奨）
-- （任意）[FinancialModelingPrep API](https://site.financialmodelingprep.com/)（FMP）のAPIキー — スタータープラン対応
+- **[FinancialModelingPrep API](https://site.financialmodelingprep.com/)（FMP）のAPIキー（Premiumプラン、必須）**
+  - ⚠️ **注意**: FMP Premiumプランは過去約5年間（2020年8月以降）の決算データのみ提供
+- （任意）[EODHD API](https://eodhistoricaldata.com/)のAPIキー（アドバンストプラン、2020年以前のデータ用）
 
 ### インストール
 
@@ -34,21 +35,24 @@ pip install -r requirements.txt
 `.env` ファイルを作成してAPIキーを設定（複数可）：
 
 ```env
-# EODHD（アドバンストプラン）
-EODHD_API_KEY=your_eodhd_api_key
-
-# FMP（スタータープラン）※任意
+# FMP（Premiumプラン）- 必須
 FMP_API_KEY=your_fmp_api_key
+
+# EODHD（アドバンストプラン）※任意、過去データ用
+# EODHD_API_KEY=your_eodhd_api_key
 ```
 
 ### 基本的な実行
 
 ```bash
-# デフォルト設定で実行（過去1ヶ月間）
+# デフォルト設定で実行（FMP使用、過去1ヶ月間）
 python main.py
 
 # 特定の期間を指定して実行
-python main.py --start_date 2025-01-01 --end_date 2025-06-30
+python main.py --start_date 2024-01-01 --end_date 2024-12-31
+
+# EODHD強制使用（過去データが必要な場合）
+python main.py --use_eodhd
 
 # ヘルプを表示
 python main.py --help
@@ -315,8 +319,11 @@ reports/
 
 メインレポート（`.html`）にはダークテーマの美しいチャートが含まれます：
 
+![バックテストレポートサンプル](docs/backtest_report_sample.png)
+*実際のバックテスト結果を表示する総合的なパフォーマンスダッシュボード*
+
 ![パフォーマンス概要](docs/backtest-report-1.png)
-*主要指標とパフォーマンス概要のダッシュボード*
+*主要指標とパフォーマンス概要の詳細分析*
 
 ![月次分析](docs/backtest-report-2.png)
 *月次パフォーマンスヒートマップとセクター分析*
@@ -421,6 +428,12 @@ python main.py --start_date 2024-01-01 --end_date 2025-06-30
 ```
 
 ## ⚠️ 重要な注意事項
+
+### データソースの移行について
+- **EODHDからFMPへの移行理由**: EODHDの決算日精度が44%と低く、戦略の信頼性に影響があったため
+- **FMPの精度**: 99.7%の高精度な決算日データを提供
+- **FMPの制限**: Premiumプラン（$14/月）では過去約5年間（2020年8月以降）のデータのみ利用可能
+- **過去データの必要性**: 2020年以前のバックテストが必要な場合は、精度は低いがEODHDを使用
 
 ### バックテストについて
 - **バックテスト結果は過去データに基づくシミュレーション**です
