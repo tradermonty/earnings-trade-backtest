@@ -99,14 +99,34 @@ class AnalysisEngine:
         
         for ticker in tqdm(df['ticker'].unique(), desc="セクター情報取得中"):
             try:
-                fundamentals = self.data_fetcher.get_fundamentals_data(ticker)
-                if fundamentals:
-                    sectors[ticker] = {
-                        'sector': fundamentals.get('General', {}).get('Sector', 'Unknown'),
-                        'industry': fundamentals.get('General', {}).get('Industry', 'Unknown')
-                    }
+                # FMP使用時は直接company profileからセクター・業種を取得
+                if hasattr(self.data_fetcher, 'use_fmp') and self.data_fetcher.use_fmp and self.data_fetcher.fmp_fetcher:
+                    profile = self.data_fetcher.fmp_fetcher.get_company_profile(ticker)
+                    if profile:
+                        sectors[ticker] = {
+                            'sector': profile.get('sector', 'Unknown'),
+                            'industry': profile.get('industry', 'Unknown')
+                        }
+                    else:
+                        sectors[ticker] = {'sector': 'Unknown', 'industry': 'Unknown'}
                 else:
-                    sectors[ticker] = {'sector': 'Unknown', 'industry': 'Unknown'}
+                    # EODHD使用時は従来の方法
+                    fundamentals = self.data_fetcher.get_fundamentals_data(ticker)
+                    if fundamentals:
+                        # EODHD形式の場合
+                        if 'General' in fundamentals:
+                            sectors[ticker] = {
+                                'sector': fundamentals.get('General', {}).get('Sector', 'Unknown'),
+                                'industry': fundamentals.get('General', {}).get('Industry', 'Unknown')
+                            }
+                        # FMP形式の場合（フォールバック）
+                        else:
+                            sectors[ticker] = {
+                                'sector': fundamentals.get('sector', 'Unknown'),
+                                'industry': fundamentals.get('industry', 'Unknown')
+                            }
+                    else:
+                        sectors[ticker] = {'sector': 'Unknown', 'industry': 'Unknown'}
             except Exception as e:
                 print(f"セクター情報の取得エラー ({ticker}): {str(e)}")
                 sectors[ticker] = {'sector': 'Unknown', 'industry': 'Unknown'}
@@ -1363,14 +1383,12 @@ class AnalysisEngine:
                 win_rate = (cap_trades['pnl'] > 0).mean() * 100
                 avg_return = cap_trades['pnl_rate'].mean()
                 total_trades = len(cap_trades)
-                total_pnl = cap_trades['pnl'].sum()
                 
                 market_cap_stats.append({
                     'category': cap_category,
                     'win_rate': win_rate,
                     'avg_return': avg_return,
-                    'total_trades': total_trades,
-                    'total_pnl': total_pnl
+                    'total_trades': total_trades
                 })
         
         if not market_cap_stats:
@@ -1378,69 +1396,76 @@ class AnalysisEngine:
         
         categories = [stat['category'] for stat in market_cap_stats]
         win_rates = [stat['win_rate'] for stat in market_cap_stats]
-        avg_returns = [stat['avg_return'] for stat in market_cap_stats]
+        avg_returns = [stat['avg_return'] for stat in market_cap_stats] 
         total_trades = [stat['total_trades'] for stat in market_cap_stats]
         
-        # サブプロット作成
-        from plotly.subplots import make_subplots
-        fig = make_subplots(
-            rows=2, cols=2,
-            subplot_titles=('勝率 (%)', '平均リターン (%)', 'トレード数', '総損益 ($)'),
-            specs=[[{"type": "bar"}, {"type": "bar"}],
-                   [{"type": "bar"}, {"type": "bar"}]]
-        )
+        # 色分け（プラス/マイナス）
+        colors = [self.theme['profit_color'] if x > 0 else self.theme['loss_color'] 
+                 for x in avg_returns]
         
-        # 勝率
-        fig.add_trace(go.Bar(
-            x=categories, y=win_rates,
-            name='勝率', 
-            marker_color=self.theme['primary_color'],
-            text=[f'{rate:.1f}%' for rate in win_rates],
-            textposition='auto'
-        ), row=1, col=1)
+        fig = go.Figure()
         
-        # 平均リターン
-        colors = ['green' if ret > 0 else 'red' for ret in avg_returns]
+        # 平均リターンの棒グラフ
         fig.add_trace(go.Bar(
-            x=categories, y=avg_returns,
-            name='平均リターン',
+            x=categories,
+            y=avg_returns,
+            name="Average Return",
             marker_color=colors,
-            text=[f'{ret:.1f}%' for ret in avg_returns],
-            textposition='auto'
-        ), row=1, col=2)
+            text=[f"{x:.1f}% ({trades})" for x, trades in zip(avg_returns, total_trades)],
+            textposition="auto"
+        ))
         
-        # トレード数
-        fig.add_trace(go.Bar(
-            x=categories, y=total_trades,
-            name='トレード数',
-            marker_color=self.theme['secondary_color'],
-            text=total_trades,
-            textposition='auto'
-        ), row=2, col=1)
-        
-        # 総損益
-        total_pnls = [stat['total_pnl'] for stat in market_cap_stats]
-        pnl_colors = ['green' if pnl > 0 else 'red' for pnl in total_pnls]
-        fig.add_trace(go.Bar(
-            x=categories, y=total_pnls,
-            name='総損益',
-            marker_color=pnl_colors,
-            text=[f'${pnl:,.0f}' for pnl in total_pnls],
-            textposition='auto'
-        ), row=2, col=2)
+        # 勝率の線グラフ
+        fig.add_trace(go.Scatter(
+            x=categories,
+            y=win_rates,
+            name="Win Rate",
+            line=dict(color=self.theme['line_color'], width=2),
+            marker=dict(size=8),
+            yaxis="y2"
+        ))
         
         fig.update_layout(
-            title_text="時価総額別パフォーマンス分析",
-            showlegend=False,
+            title=dict(
+                text="Market Cap Performance",
+                font=dict(color=self.theme['text_color'], size=18)
+            ),
+            xaxis=dict(
+                title=dict(text="Market Cap Category", font=dict(color=self.theme['text_color'])),
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color']),
+                tickangle=-45
+            ),
+            yaxis=dict(
+                title=dict(text="Return (%)", font=dict(color=self.theme['text_color'])),
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color'])
+            ),
+            yaxis2=dict(
+                title=dict(text="Win Rate (%)", font=dict(color=self.theme['text_color'])),
+                overlaying="y",
+                side="right",
+                range=[0, 100],
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color'])
+            ),
             paper_bgcolor=self.theme['bg_color'],
             plot_bgcolor=self.theme['plot_bg_color'],
             font=dict(color=self.theme['text_color']),
-            height=800
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1,
+                font=dict(color=self.theme['text_color'])
+            ),
+            height=600
         )
-        
-        # X軸ラベルを45度回転
-        fig.update_xaxes(tickangle=45, tickfont=dict(color=self.theme['text_color']))
-        fig.update_yaxes(tickfont=dict(color=self.theme['text_color']))
         
         return fig.to_html(include_plotlyjs='cdn', div_id="market-cap-performance-chart")
     
@@ -1451,9 +1476,9 @@ class AnalysisEngine:
         
         # 価格帯カテゴリの順序を定義
         price_order = [
-            "高価格帯 (>$100)",
-            "中価格帯 ($30-100)",
-            "低価格帯 (<$30)"
+            "High Price (>$100)",
+            "Mid Price ($30-100)",
+            "Low Price (<$30)"
         ]
         
         # データを集計 
@@ -1464,16 +1489,12 @@ class AnalysisEngine:
                 win_rate = (price_trades['pnl'] > 0).mean() * 100
                 avg_return = price_trades['pnl_rate'].mean()
                 total_trades = len(price_trades)
-                total_pnl = price_trades['pnl'].sum()
-                avg_holding_days = price_trades['holding_period'].mean()
                 
                 price_stats.append({
                     'category': price_category,
                     'win_rate': win_rate,
                     'avg_return': avg_return,
-                    'total_trades': total_trades,
-                    'total_pnl': total_pnl,
-                    'avg_holding_days': avg_holding_days
+                    'total_trades': total_trades
                 })
         
         if not price_stats:
@@ -1483,77 +1504,72 @@ class AnalysisEngine:
         win_rates = [stat['win_rate'] for stat in price_stats]
         avg_returns = [stat['avg_return'] for stat in price_stats]
         total_trades = [stat['total_trades'] for stat in price_stats]
-        avg_holding = [stat['avg_holding_days'] for stat in price_stats]
         
-        # サブプロット作成
-        from plotly.subplots import make_subplots
-        fig = make_subplots(
-            rows=2, cols=3,
-            subplot_titles=('勝率 (%)', '平均リターン (%)', 'トレード数', 
-                          '総損益 ($)', '平均保有日数', ''),
-            specs=[[{"type": "bar"}, {"type": "bar"}, {"type": "bar"}],
-                   [{"type": "bar"}, {"type": "bar"}, {"type": "xy"}]]
-        )
+        # 色分け（プラス/マイナス）
+        colors = [self.theme['profit_color'] if x > 0 else self.theme['loss_color'] 
+                 for x in avg_returns]
         
-        # 勝率
+        fig = go.Figure()
+        
+        # 平均リターンの棒グラフ
         fig.add_trace(go.Bar(
-            x=categories, y=win_rates,
-            name='勝率',
-            marker_color=self.theme['primary_color'],
-            text=[f'{rate:.1f}%' for rate in win_rates],
-            textposition='auto'
-        ), row=1, col=1)
-        
-        # 平均リターン
-        colors = ['green' if ret > 0 else 'red' for ret in avg_returns]
-        fig.add_trace(go.Bar(
-            x=categories, y=avg_returns,
-            name='平均リターン',
+            x=categories,
+            y=avg_returns,
+            name="Average Return",
             marker_color=colors,
-            text=[f'{ret:.1f}%' for ret in avg_returns],
-            textposition='auto'
-        ), row=1, col=2)
+            text=[f"{x:.1f}% ({trades})" for x, trades in zip(avg_returns, total_trades)],
+            textposition="auto"
+        ))
         
-        # トレード数
-        fig.add_trace(go.Bar(
-            x=categories, y=total_trades,
-            name='トレード数',
-            marker_color=self.theme['secondary_color'],
-            text=total_trades,
-            textposition='auto'
-        ), row=1, col=3)
-        
-        # 総損益
-        total_pnls = [stat['total_pnl'] for stat in price_stats]
-        pnl_colors = ['green' if pnl > 0 else 'red' for pnl in total_pnls]
-        fig.add_trace(go.Bar(
-            x=categories, y=total_pnls,
-            name='総損益',
-            marker_color=pnl_colors,
-            text=[f'${pnl:,.0f}' for pnl in total_pnls],
-            textposition='auto'
-        ), row=2, col=1)
-        
-        # 平均保有日数
-        fig.add_trace(go.Bar(
-            x=categories, y=avg_holding,
-            name='平均保有日数',
-            marker_color=self.theme['accent_color'],
-            text=[f'{days:.1f}日' for days in avg_holding],
-            textposition='auto'
-        ), row=2, col=2)
+        # 勝率の線グラフ
+        fig.add_trace(go.Scatter(
+            x=categories,
+            y=win_rates,
+            name="Win Rate",
+            line=dict(color=self.theme['line_color'], width=2),
+            marker=dict(size=8),
+            yaxis="y2"
+        ))
         
         fig.update_layout(
-            title_text="価格帯別パフォーマンス分析",
-            showlegend=False,
+            title=dict(
+                text="Price Range Performance",
+                font=dict(color=self.theme['text_color'], size=18)
+            ),
+            xaxis=dict(
+                title=dict(text="Price Range Category", font=dict(color=self.theme['text_color'])),
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color'])
+            ),
+            yaxis=dict(
+                title=dict(text="Return (%)", font=dict(color=self.theme['text_color'])),
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color'])
+            ),
+            yaxis2=dict(
+                title=dict(text="Win Rate (%)", font=dict(color=self.theme['text_color'])),
+                overlaying="y",
+                side="right",
+                range=[0, 100],
+                gridcolor=self.theme['grid_color'],
+                tickcolor=self.theme['text_color'],
+                tickfont=dict(color=self.theme['text_color'])
+            ),
             paper_bgcolor=self.theme['bg_color'],
             plot_bgcolor=self.theme['plot_bg_color'],
             font=dict(color=self.theme['text_color']),
-            height=800
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1,
+                font=dict(color=self.theme['text_color'])
+            ),
+            height=600
         )
-        
-        # X軸ラベルを回転
-        fig.update_xaxes(tickangle=15, tickfont=dict(color=self.theme['text_color']))
-        fig.update_yaxes(tickfont=dict(color=self.theme['text_color']))
         
         return fig.to_html(include_plotlyjs='cdn', div_id="price-range-performance-chart")

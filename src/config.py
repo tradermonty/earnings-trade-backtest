@@ -38,6 +38,9 @@ class ThemeConfig:
         'grid_color': '#475569',  # グリッド線をさらに暗く調整
         'text_color': '#f1f5f9',  # より明るい白でテキストを見やすく
         'line_color': '#60a5fa',
+        'primary_color': '#60a5fa',  # プライマリカラーを追加
+        'secondary_color': '#a78bfa',  # セカンダリカラーを追加（紫系）
+        'accent_color': '#f59e0b',  # アクセントカラーを追加（オレンジ系）
         'profit_color': '#22c55e',
         'loss_color': '#ef4444',
         'table_border_color': '#475569'  # テーブル枠線用の色を追加

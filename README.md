@@ -2,10 +2,11 @@
 
 *Read this in other languages: [English](README.md), [日本語](README_ja.md)*
 
-A comprehensive backtesting system for earnings-based swing trading strategies, specialized for mid and small-cap stocks using high-precision data from **FinancialModelingPrep (FMP) API** or EODHD API.
+A comprehensive backtesting system for earnings-based swing trading strategies, specialized for mid and small-cap stocks. Originally developed with EODHD API, the system has migrated to **FinancialModelingPrep (FMP) API** for significantly improved earnings date accuracy.
 
 ## ✨ Latest Updates (2025.07)
 
+- **🔄 Data Source Migration**: Migrated from EODHD to FMP due to low date accuracy issues
 - **🎯 99.7% Accuracy**: FMP integration achieves 99.7% earnings date accuracy (vs 44% with EODHD)
 - **⚡ Enhanced Performance**: Stronger rate limiting and optimized API calls
 - **🔧 Simplified Architecture**: Automatic data source selection with fallback
@@ -16,8 +17,9 @@ A comprehensive backtesting system for earnings-based swing trading strategies, 
 ### Prerequisites
 
 - Python 3.11 or higher
-- **[FinancialModelingPrep API](https://site.financialmodelingprep.com/) key (Premium plan, recommended)**
-- (Optional) [EODHD API](https://eodhistoricaldata.com/) key (Advanced plan, fallback)
+- **[FinancialModelingPrep API](https://site.financialmodelingprep.com/) key (Premium plan, required)**
+  - ⚠️ **Note**: FMP Premium plan only provides earnings data for the past ~5 years (from August 2020 onwards)
+- (Optional) [EODHD API](https://eodhistoricaldata.com/) key (Advanced plan, for historical data before 2020)
 
 ### Installation
 
@@ -66,16 +68,17 @@ python main.py --help
 
 ## 📊 Data Source Comparison
 
-| Feature | **FMP (Recommended)** | EODHD |
+| Feature | **FMP (Primary)** | EODHD (Legacy) |
 |---------|----------------------|-------|
 | **Earnings Date Accuracy** | **99.7%** ✅ | ~44% ⚠️ |
+| **Historical Data Range** | **~5 years** (2020-08+) ⚠️ | **10+ years** ✅ |
 | **Data Coverage** | **95.5%** US stocks | ~90% US stocks |
 | **API Reliability** | **Excellent** | Good |
 | **Rate Limiting** | **Advanced** (600 calls/min) | Standard |
 | **Required Plan** | Premium ($14/month) | Advanced ($50/month) |
 | **Date Validation** | **Not needed** | Required (complex) |
 
-*Based on analysis of 648 earnings events in July 2025*
+*We migrated from EODHD to FMP due to the critical importance of accurate earnings dates for this strategy*
 
 ## 📁 Project Structure
 
@@ -198,7 +201,7 @@ reports/
 ### Key Metrics Dashboard
 
 ![Performance Summary](docs/backtest-report-1.png)
-*Comprehensive performance dashboard with equity curve and key metrics*
+*Detailed performance metrics and equity curve analysis*
 
 ### Analysis Features
 
@@ -297,6 +300,8 @@ Based on comprehensive analysis of 648 earnings events (July 2025):
 
 ### Limitations
 
+- **FMP Historical Data**: Premium plan limited to ~5 years of earnings data (August 2020 onwards)
+  - For backtests before 2020, use EODHD despite lower accuracy
 - **Backtest simulation**: Results may differ from live trading
 - **Market conditions**: Strategy performance varies by market regime
 - **API dependencies**: Requires stable third-party data sources

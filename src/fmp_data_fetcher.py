@@ -194,6 +194,118 @@ class FMPDataFetcher:
         
         return None
     
+    def _get_earnings_for_specific_symbols(self, symbols: List[str], from_date: str, to_date: str) -> List[Dict]:
+        """
+        特定銘柄の決算データを効率的に取得
+        
+        Args:
+            symbols: 銘柄リスト
+            from_date: 開始日
+            to_date: 終了日
+        
+        Returns:
+            決算データリスト
+        """
+        all_earnings = []
+        
+        for symbol in symbols:
+            logger.info(f"Fetching earnings for {symbol}")
+            
+            # まず earnings-surprises エンドポイントを試す
+            endpoint = f'earnings-surprises/{symbol}'
+            params = {'limit': 80}  # 四半期ごとなので80件で約20年分
+            
+            data = self._make_request(endpoint, params)
+            
+            if not data:
+                # フォールバック1: historical/earning_calendar を試す（正しいエンドポイント）
+                logger.debug(f"earnings-surprises failed for {symbol}, trying historical/earning_calendar")
+                # v3 APIを使用
+                original_base = self.base_url
+                self.base_url = self.alt_base_url
+                endpoint = f'historical/earning_calendar/{symbol}'
+                data = self._make_request(endpoint, params)
+                self.base_url = original_base
+            
+            if not data:
+                # フォールバック2: v3 earnings APIを試す
+                logger.debug(f"historical/earning_calendar failed for {symbol}, trying v3 earnings API")
+                # base_urlを一時的にv3に変更
+                original_base = self.base_url
+                self.base_url = self.alt_base_url
+                endpoint = f'earnings/{symbol}'
+                params = {'limit': 80}
+                data = self._make_request(endpoint, params)
+                self.base_url = original_base
+            
+            if data:
+                # dataがリストでない場合の処理
+                if isinstance(data, dict):
+                    data = [data]
+                
+                # 日付範囲でフィルタリング
+                filtered_data = []
+                start_dt = datetime.strptime(from_date, '%Y-%m-%d')
+                end_dt = datetime.strptime(to_date, '%Y-%m-%d')
+                
+                for item in data:
+                    if 'date' in item:
+                        try:
+                            item_date = datetime.strptime(item['date'], '%Y-%m-%d')
+                            if start_dt <= item_date <= end_dt:
+                                # earnings-calendar 形式に変換
+                                earnings_item = {
+                                    'date': item['date'],
+                                    'symbol': symbol,
+                                    'epsActual': item.get('actualEarningResult', item.get('eps', item.get('epsActual'))),
+                                    'epsEstimate': item.get('estimatedEarning', item.get('epsEstimated', item.get('epsEstimate'))),
+                                    'revenue': item.get('revenue'),
+                                    'revenueEstimated': item.get('revenueEstimated'),
+                                    'time': item.get('time', 'N/A'),
+                                    'updatedFromDate': item.get('updatedFromDate', item['date']),
+                                    'fiscalDateEnding': item.get('fiscalDateEnding', item['date'])
+                                }
+                                filtered_data.append(earnings_item)
+                        except ValueError as e:
+                            logger.debug(f"Date parsing error for {symbol}: {e}")
+                
+                logger.info(f"Found {len(filtered_data)} earnings records for {symbol} in date range")
+                all_earnings.extend(filtered_data)
+            else:
+                # 最終フォールバック: キャッシュされた決算カレンダーを使用
+                logger.warning(f"No direct earnings data found for {symbol}, will use bulk calendar as fallback")
+        
+        return all_earnings
+    
+    def get_earnings_surprises(self, symbol: str, limit: int = 80) -> Optional[List[Dict]]:
+        """
+        特定銘柄の決算サプライズデータを取得
+        
+        Args:
+            symbol: 銘柄シンボル
+            limit: 取得件数上限（デフォルト: 80件、約20年分）
+        
+        Returns:
+            決算サプライズデータのリスト、またはNone
+        """
+        logger.info(f"Fetching earnings surprises for {symbol}")
+        
+        endpoint = f'earnings-surprises/{symbol}'
+        params = {'limit': limit}
+        
+        data = self._make_request(endpoint, params)
+        
+        if data:
+            # データの形式を確認してリストに統一
+            if isinstance(data, dict):
+                data = [data]
+            
+            logger.info(f"Retrieved {len(data)} earnings surprise records for {symbol}")
+            return data
+        else:
+            logger.warning(f"No earnings surprise data found for {symbol}")
+            return None
+    
     def get_earnings_calendar(self, from_date: str, to_date: str, target_symbols: List[str] = None, us_only: bool = True) -> List[Dict]:
         """
         決算カレンダーをBulk取得 (Premium+ plan required)
@@ -208,6 +320,23 @@ class FMPDataFetcher:
         Returns:
             決算データリスト
         """
+        # 特定銘柄のみの場合は、個別銘柄APIを使用（効率的）
+        if target_symbols and len(target_symbols) <= 10:
+            logger.info(f"Using individual symbol API for {len(target_symbols)} symbols")
+            specific_earnings = self._get_earnings_for_specific_symbols(target_symbols, from_date, to_date)
+            
+            # 個別APIで取得できなかった銘柄を確認
+            found_symbols = set(item['symbol'] for item in specific_earnings)
+            missing_symbols = set(target_symbols) - found_symbols
+            
+            if missing_symbols:
+                logger.warning(f"Could not find earnings data for {missing_symbols} via individual API, falling back to bulk calendar")
+                # バルクカレンダーにフォールバック（ただし、特定銘柄でフィルタリング）
+                # このまま続行して通常のバルク取得を実行
+            else:
+                # すべての銘柄のデータが取得できた場合は返す
+                return specific_earnings
+        
         logger.info(f"Fetching earnings calendar from {from_date} to {to_date}")
         
         # 日付をdatetimeオブジェクトに変換
@@ -238,7 +367,7 @@ class FMPDataFetcher:
         # 開始日が制限日以降でも、一部が制限範囲に入る場合の警告
         if start_dt < datetime(2020, 9, 1):
             logger.warning(f"Warning: FMP data coverage may be limited for dates close to August 2020. "
-                         f"For comprehensive historical analysis, consider using EODHD data source.")
+                         f"For comprehensive historical analysis, consider using alternative data source.")
         
         # 期間が90日を超える場合は分割
         max_days = 30  # 30日ごとに分割（安全マージン）
@@ -273,6 +402,17 @@ class FMPDataFetcher:
         if len(all_data) == 0:
             logger.warning("earnings-calendar endpoint returned no data, trying alternative method")
             return self._get_earnings_calendar_alternative(from_date, to_date, target_symbols, us_only)
+        
+        # 特定銘柄のみ要求されている場合はフィルタリング
+        if target_symbols:
+            filtered_data = []
+            target_set = set(target_symbols)  # 高速検索のためセットに変換
+            for item in all_data:
+                if item.get('symbol', '') in target_set:
+                    filtered_data.append(item)
+            
+            logger.info(f"Filtered to {len(filtered_data)} records for target symbols: {target_symbols}")
+            return filtered_data
         
         # アメリカ市場のみにフィルタリング
         if us_only:
