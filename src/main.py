@@ -90,9 +90,22 @@ class EarningsBacktest:
     def _get_target_symbols(self) -> Optional[set]:
         """ターゲット銘柄リストを取得"""
         symbols = set()
+        
+        if self.config.sp500_only:
+            sp500_symbols = self.data_fetcher.get_sp500_symbols()
+            if sp500_symbols:
+                symbols.update(sp500_symbols)
+                
+        elif self.config.mid_small_only:
+            mid_small_symbols = self.data_fetcher.get_mid_small_symbols(
+                min_market_cap=self.config.min_market_cap,
+                max_market_cap=self.config.max_market_cap
+            )
+            if mid_small_symbols:
+                symbols.update(mid_small_symbols)
 
-        # 1) FMP スクリーナーで基本条件を満たす銘柄を取得
-        if getattr(self.data_fetcher, 'fmp_fetcher', None):
+        # FMP スクリーナーで基本条件を満たす銘柄を取得
+        elif getattr(self.data_fetcher, 'fmp_fetcher', None):
             try:
                 screener_list = self.data_fetcher.fmp_fetcher.stock_screener(
                     price_more_than=self.config.screener_price_min,
@@ -106,20 +119,7 @@ class EarningsBacktest:
                     print(f"FMPスクリーナーで取得した候補銘柄数: {len(screener_list)}")
             except Exception as e:
                 print(f"FMPスクリーナー取得失敗: {e}")
-        
-        if self.config.sp500_only:
-            sp500_symbols = self.data_fetcher.get_sp500_symbols()
-            if sp500_symbols:
-                symbols.update(sp500_symbols)
-        
-        if self.config.mid_small_only:
-            mid_small_symbols = self.data_fetcher.get_mid_small_symbols(
-                min_market_cap=self.config.min_market_cap,
-                max_market_cap=self.config.max_market_cap
-            )
-            if mid_small_symbols:
-                symbols.update(mid_small_symbols)
-        
+
         return symbols if symbols else None
     
     def execute_backtest(self) -> Dict[str, Any]:

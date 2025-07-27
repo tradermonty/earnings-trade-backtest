@@ -212,7 +212,8 @@ class FMPDataFetcher:
             logger.info(f"Fetching earnings for {symbol}")
             
             # まず earnings-surprises エンドポイントを試す
-            endpoint = f'earnings-surprises/{symbol}'
+            norm_symbol = self._normalize_symbol(symbol)
+            endpoint = f'earnings-surprises/{norm_symbol}'
             params = {'limit': 80}  # 四半期ごとなので80件で約20年分
             
             data = self._make_request(endpoint, params)
@@ -223,7 +224,7 @@ class FMPDataFetcher:
                 # v3 APIを使用
                 original_base = self.base_url
                 self.base_url = self.alt_base_url
-                endpoint = f'historical/earning_calendar/{symbol}'
+                endpoint = f'historical/earning_calendar/{norm_symbol}'
                 data = self._make_request(endpoint, params)
                 self.base_url = original_base
             
@@ -233,7 +234,7 @@ class FMPDataFetcher:
                 # base_urlを一時的にv3に変更
                 original_base = self.base_url
                 self.base_url = self.alt_base_url
-                endpoint = f'earnings/{symbol}'
+                endpoint = f'earnings/{norm_symbol}'
                 params = {'limit': 80}
                 data = self._make_request(endpoint, params)
                 self.base_url = original_base
@@ -290,7 +291,7 @@ class FMPDataFetcher:
         """
         logger.info(f"Fetching earnings surprises for {symbol}")
         
-        endpoint = f'earnings-surprises/{symbol}'
+        endpoint = f'earnings-surprises/{self._normalize_symbol(symbol)}'
         params = {'limit': limit}
         
         data = self._make_request(endpoint, params)
@@ -565,9 +566,10 @@ class FMPDataFetcher:
         logger.debug(f"Fetching company profile for {symbol}")
         
         # Try different endpoints - profile data is only available on v3 API
+        norm_symbol = self._normalize_symbol(symbol)
         endpoints_to_try = [
-            ('v3', f'profile/{symbol}'),      # v3 endpoint (correct one)
-            ('stable', f'profile/{symbol}'),  # stable endpoint (backup)
+            ('v3', f'profile/{norm_symbol}'),      # v3 endpoint (correct one)
+            ('stable', f'profile/{norm_symbol}'),  # stable endpoint (backup)
         ]
         
         data = None
@@ -691,6 +693,23 @@ class FMPDataFetcher:
             return float(value)
         except (ValueError, TypeError):
             return None
+
+    # --- 追加: シンボル正規化ユーティリティ ------------------------------
+    def _normalize_symbol(self, symbol: str) -> str:
+        """API が要求する形式にシンボルを正規化する
+
+        例: "BRK.B" → "BRK-B"
+
+        Args:
+            symbol: 元のシンボル文字列
+
+        Returns:
+            正規化済みシンボル
+        """
+        if symbol is None:
+            return symbol
+        # FMP では複数株式クラスをハイフン区切りで表記するため
+        return symbol.replace('.', '-')
     
     def get_historical_price_data(self, symbol: str, from_date: str, to_date: str) -> Optional[List[Dict]]:
         """
@@ -707,15 +726,16 @@ class FMPDataFetcher:
         logger.debug(f"Fetching historical price data for {symbol} from {from_date} to {to_date}")
         
         # Try different endpoint formats and base URLs for FMP
+        normalized_symbol = self._normalize_symbol(symbol)
         endpoints_to_try = [
             # Stable API endpoints
-            ('stable', f'historical-price-full/{symbol}'),
-            ('stable', f'historical-chart/1day/{symbol}'),
-            ('stable', f'historical/{symbol}'),
+            ('stable', f'historical-price-full/{normalized_symbol}'),
+            ('stable', f'historical-chart/1day/{normalized_symbol}'),
+            ('stable', f'historical/{normalized_symbol}'),
             # API v3 endpoints
-            ('v3', f'historical-price-full/{symbol}'),
-            ('v3', f'historical-chart/1day/{symbol}'),
-            ('v3', f'historical-daily-prices/{symbol}'),
+            ('v3', f'historical-price-full/{normalized_symbol}'),
+            ('v3', f'historical-chart/1day/{normalized_symbol}'),
+            ('v3', f'historical-daily-prices/{normalized_symbol}'),
         ]
         
         params = {
@@ -915,13 +935,14 @@ class FMPDataFetcher:
 
     def stock_screener(self, price_more_than: float = 10, market_cap_more_than: float = 1e9,
                        market_cap_less_than: Optional[float] = None,
-                       volume_more_than: int = 200000, limit: int = 5000, exchange: Optional[str] = None) -> List[str]:
+                       volume_more_than: Optional[int] = None,  # Volume filtering is intentionally ignored in this stage
+                       limit: int = 5000, exchange: Optional[str] = None) -> List[str]:
         """指定条件でFMPストックスクリーナーを実行し、銘柄シンボルのリストを返す
 
         Args:
             price_more_than: 株価下限（デフォルト: $10）
             market_cap_more_than: 時価総額下限（デフォルト: $1B）
-            volume_more_than: 平均出来高下限（デフォルト: 200,000株）
+            volume_more_than: 平均出来高下限（**第2段階でフィルタリングするため、この関数では使用しない**）
             limit: 取得件数上限（デフォルト: 5000）
             exchange: 取引所を限定する場合に指定（'NASDAQ' など）
 
@@ -929,13 +950,12 @@ class FMPDataFetcher:
             条件を満たす銘柄シンボルのリスト
         """
         logger.info(
-            f"Running stock screener (price >= ${price_more_than}, marketCap >= {market_cap_more_than}, "
-            f"volume >= {volume_more_than})")
+            f"Running stock screener (price >= ${price_more_than}, marketCap >= {market_cap_more_than}) "
+            f"[volume filter deferred]")
 
         params = {
             'priceMoreThan': price_more_than,
             'marketCapMoreThan': int(market_cap_more_than),
-            'volumeMoreThan': int(volume_more_than),
             'limit': limit,
             # 追加フィルタリング
             'country': 'US',             # 米国企業のみ
@@ -944,6 +964,9 @@ class FMPDataFetcher:
             'isActivelyTrading': 'true', # 取引停止銘柄除外
             'includeAllShareClasses': 'false'
         }
+        # 第1段階では出来高フィルタを適用しない方針
+        # volumeMoreThan パラメータは使用せず、必要に応じて呼び出し側で後段フィルタをかける
+
         if market_cap_less_than is not None and market_cap_less_than < 1e12:
             params['marketCapLowerThan'] = int(market_cap_less_than)
         if exchange:
@@ -981,8 +1004,8 @@ class FMPDataFetcher:
                     allowed_market = exch in ['NASDAQ', 'NYSE', 'AMEX'] or country == 'US'
 
                 if symbol and allowed_market:
-                    # 特殊ティッカーを除外（例: BRK.A, BRK-B, ^SPX など）
-                    if not any(x in symbol for x in ['.', '-', '^', '=']):
+                    # 不要な特殊ティッカーを除外（指数・先物など）
+                    if not any(x in symbol for x in ['^', '=']):
                         symbols.append(symbol)
 
         logger.info(f"Stock screener retrieved {len(symbols)} symbols")
