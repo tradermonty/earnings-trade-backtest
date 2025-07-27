@@ -112,7 +112,8 @@ class EarningsBacktest:
                     market_cap_more_than=self.config.min_market_cap,
                     market_cap_less_than=self.config.max_market_cap if self.config.max_market_cap < 1e12 else None,
                     volume_more_than=self.config.screener_volume_min,
-                    limit=10000
+                    limit=10000,
+                    exchange='NYSE,NASDAQ,AMEX'  # 米国主要取引所のみに限定
                 )
                 if screener_list:
                     symbols.update(screener_list)
