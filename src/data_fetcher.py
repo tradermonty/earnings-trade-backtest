@@ -81,40 +81,23 @@ class DataFetcher:
             logging.error(f"S&P500銘柄リストの取得に失敗: {str(e)}")
             return []
 
-    def get_mid_small_symbols(self, use_market_cap_filter: bool = False, 
-                             min_market_cap: float = 1e9, max_market_cap: float = 50e9) -> List[str]:
-        """S&P 400とS&P 600の銘柄リストを取得（FMPまたはEODHD）"""
-        symbols = []
-        
+    def get_mid_small_symbols(self, min_market_cap: float = 1e9, max_market_cap: float = 50e9) -> List[str]:
+        """時価総額レンジで中型・小型株を取得（優先: FMP company-screener）"""
+        symbols: List[str] = []
+
+        # 1) FMP から取得
         if self.use_fmp and self.fmp_fetcher:
             try:
-                if use_market_cap_filter:
-                    # 時価総額ベースのフィルタリングを使用
-                    logging.info(f"時価総額ベースで中小型株を取得 (${min_market_cap/1e9:.1f}B - ${max_market_cap/1e9:.1f}B)")
-                    symbols = self.fmp_fetcher.get_mid_small_cap_symbols(min_market_cap, max_market_cap)
-                    
-                    if symbols:
-                        logging.info(f"FMP時価総額ベースで取得した中小型株銘柄数: {len(symbols)}")
-                        return symbols
-                    else:
-                        logging.warning("FMP時価総額ベースフィルタリングでデータが取得できませんでした")
-                else:
-                    # 従来のS&P 400/600を試行
-                    sp400_symbols = self.fmp_fetcher.get_sp400_constituents()
-                    sp600_symbols = self.fmp_fetcher.get_sp600_constituents()
-                    
-                    symbols.extend(sp400_symbols)
-                    symbols.extend(sp600_symbols)
-                    
-                    if symbols:
-                        logging.info(f"FMPから取得したS&P 400/600銘柄数: {len(symbols)}")
-                        return symbols
-                    else:
-                        logging.warning("FMPではS&P 400/600データが利用できません。EODHDにフォールバック")
+                logging.info(
+                    f"FMP stock screener: {min_market_cap/1e9:.1f}B – {max_market_cap/1e9 if max_market_cap<1e12 else '∞'}B")
+                symbols = self.fmp_fetcher.get_mid_small_cap_symbols(min_market_cap, max_market_cap)
+                if symbols:
+                    logging.info(f"Retrieved {len(symbols)} mid/small-cap symbols via FMP screener")
+                    return symbols
             except Exception as e:
-                logging.warning(f"FMP中型・小型株データ取得失敗: {e}")
-        
-        # EODHD or fallback (only if API key is available)
+                logging.warning(f"FMP mid/small-cap fetch failed: {e}")
+
+        # 2) EODHD fallback（APIキーがある場合のみ）
         if self.api_key:  # EODHDキーが利用可能な場合のみ実行
             try:
                 # S&P 400 (MID)の取得
@@ -152,24 +135,26 @@ class DataFetcher:
                 logging.error(f"中型・小型株銘柄リストの取得に失敗: {str(e)}")
                 return []
         else:
-            logging.info("EODHD APIキーが設定されていないため中型・小型株データをスキップします")
+            logging.info("EODHD APIキーが設定されていないため中小型株リストをスキップ")
             return []
 
-    def get_earnings_data(self, start_date: str, end_date: str) -> Dict[str, Any]:
-        """決算データを取得（FMPまたはEODHD）"""
+    def get_earnings_data(self, start_date: str, end_date: str, target_symbols: Optional[list] = None) -> Dict[str, Any]:
+        """決算データを取得（FMP または EODHD）
+        target_symbols を指定すると該当銘柄のみに絞って取得。
+        """
         data_source = "FMP" if self.use_fmp else "EODHD"
         print(f"\n1. 決算データの取得を開始 ({data_source}: {start_date} から {end_date})")
         
         if self.use_fmp and self.fmp_fetcher:
-            return self._get_earnings_data_fmp(start_date, end_date)
+            return self._get_earnings_data_fmp(start_date, end_date, target_symbols)
         else:
             return self._get_earnings_data_eodhd(start_date, end_date)
     
-    def _get_earnings_data_fmp(self, start_date: str, end_date: str) -> Dict[str, Any]:
+    def _get_earnings_data_fmp(self, start_date: str, end_date: str, target_symbols: Optional[list]) -> Dict[str, Any]:
         """FMPから決算データを取得"""
         try:
             # FMP Bulk APIで一括取得（アメリカ市場のみ）
-            fmp_data = self.fmp_fetcher.get_earnings_calendar(start_date, end_date, us_only=True)
+            fmp_data = self.fmp_fetcher.get_earnings_calendar(start_date, end_date, target_symbols=target_symbols, us_only=True)
             
             if not fmp_data:
                 print("FMP決算データの取得に失敗しました")

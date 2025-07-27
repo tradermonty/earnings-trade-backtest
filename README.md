@@ -183,10 +183,16 @@ python main.py --risk_limit 10 --max_holding_days 120
 | `--stop_loss` | 6 | Stop loss % | 2-10 |
 | `--position_size` | 6 | Position size % | 2-10 |
 | `--margin_ratio` | 1.5 | Max leverage | 1.0-3.0 |
-| `--sp500_only` | False | S&P 500 stocks only | Boolean |
-| `--mid_small_only` | False | Mid/small cap only | Boolean |
-| `--use_eodhd` | False | Force EODHD usage | Boolean |
-| `--language` | 'en' | Report language | 'en'/'ja' |
+| `--sp500_only` | False | Limit universe to S&P 500 constituents | Boolean |
+| `--mid_small_only` | False | Limit universe to mid/small-cap stocks (S&P 400/600 + market-cap range) | Boolean |
+| `--min_market_cap` | 1 | Minimum market-cap **in billions USD** passed to FMP screener | 0-∞ |
+| `--max_market_cap` | 0 | Maximum market-cap (0 = no upper limit) | 0-∞ |
+| `--screener_price_min` | 10 | Minimum share price (USD) in FMP screener | ≥0 |
+| `--screener_volume_min` | 200 000 | Minimum 20-day average volume in FMP screener | ≥0 |
+| `--max_gap` | 10 | Maximum allowable opening gap % | ≥0 |
+| `--pre_earnings_change` | 0 | Minimum price change % in the 20 trading-days **before** earnings | Any |
+| `--use_eodhd` | False | Force EODHD data source (for pre-2020 backtests) | Boolean |
+| `--language` | 'en' | Report language | 'en' / 'ja' |
 
 ## 📊 Performance Analysis
 

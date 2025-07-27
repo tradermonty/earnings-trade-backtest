@@ -46,14 +46,15 @@ class EarningsBacktest:
         self.api_key = self.data_fetcher.api_key
         
         # 銘柄リストの取得
-        target_symbols = self._get_target_symbols()
+        self.target_symbols = self._get_target_symbols()
         
         # データフィルタリングコンポーネント
         self.data_filter = DataFilter(
             data_fetcher=self.data_fetcher,
-            target_symbols=target_symbols,
+            target_symbols=self.target_symbols,
             pre_earnings_change=self.config.pre_earnings_change,
             max_holding_days=self.config.max_holding_days,
+            max_gap_percent=self.config.max_gap_percent,
             enable_date_validation=self.config.enable_earnings_date_validation,
             api_key=self.api_key
         )
@@ -88,10 +89,23 @@ class EarningsBacktest:
     
     def _get_target_symbols(self) -> Optional[set]:
         """ターゲット銘柄リストを取得"""
-        if not (self.config.sp500_only or self.config.mid_small_only):
-            return None
-        
         symbols = set()
+
+        # 1) FMP スクリーナーで基本条件を満たす銘柄を取得
+        if getattr(self.data_fetcher, 'fmp_fetcher', None):
+            try:
+                screener_list = self.data_fetcher.fmp_fetcher.stock_screener(
+                    price_more_than=self.config.screener_price_min,
+                    market_cap_more_than=self.config.min_market_cap,
+                    market_cap_less_than=self.config.max_market_cap if self.config.max_market_cap < 1e12 else None,
+                    volume_more_than=self.config.screener_volume_min,
+                    limit=10000
+                )
+                if screener_list:
+                    symbols.update(screener_list)
+                    print(f"FMPスクリーナーで取得した候補銘柄数: {len(screener_list)}")
+            except Exception as e:
+                print(f"FMPスクリーナー取得失敗: {e}")
         
         if self.config.sp500_only:
             sp500_symbols = self.data_fetcher.get_sp500_symbols()
@@ -100,7 +114,6 @@ class EarningsBacktest:
         
         if self.config.mid_small_only:
             mid_small_symbols = self.data_fetcher.get_mid_small_symbols(
-                use_market_cap_filter=self.config.use_market_cap_filter,
                 min_market_cap=self.config.min_market_cap,
                 max_market_cap=self.config.max_market_cap
             )
@@ -124,8 +137,9 @@ class EarningsBacktest:
             # 1. 決算データの取得
             print("\n1. 決算データの取得中...")
             earnings_data = self.data_fetcher.get_earnings_data(
-                self.config.start_date, 
-                self.config.end_date
+                self.config.start_date,
+                self.config.end_date,
+                target_symbols=list(self.target_symbols) if self.target_symbols else None
             )
             
             # 2. データのフィルタリング
@@ -188,7 +202,12 @@ class EarningsBacktest:
             'mid_small_only': self.config.mid_small_only,
             'language': self.config.language,
             'pre_earnings_change': self.config.pre_earnings_change,
-            'margin_ratio': self.config.margin_ratio
+            'margin_ratio': self.config.margin_ratio,
+            'max_gap_percent': self.config.max_gap_percent,
+            'screener_price_min': self.config.screener_price_min,
+            'screener_volume_min': self.config.screener_volume_min,
+            'min_market_cap': self.config.min_market_cap,
+            'max_market_cap': self.config.max_market_cap
         }
     
     def _generate_reports(self):
@@ -246,10 +265,12 @@ def create_backtest_from_args(args) -> EarningsBacktest:
         enable_earnings_date_validation=args.enable_date_validation,
         # データソース設定: デフォルトはFMP、--use_eodhd指定時のみEODHD
         use_fmp_data=not getattr(args, 'use_eodhd', False),
-        # 時価総額フィルター設定: デフォルトは無効、--use_market_cap_filter指定時のみ有効
-        use_market_cap_filter=getattr(args, 'use_market_cap_filter', False),
+        # use_market_cap_filter 廃止
         min_market_cap=args.min_market_cap * 1e9,  # Convert billions to actual value
-        max_market_cap=args.max_market_cap * 1e9   # Convert billions to actual value
+        max_market_cap=(args.max_market_cap * 1e9) if args.max_market_cap > 0 else 1e12,
+        screener_price_min=args.screener_price_min,
+        screener_volume_min=args.screener_volume_min,
+        max_gap_percent=args.max_gap
     )
     
     return EarningsBacktest(config)

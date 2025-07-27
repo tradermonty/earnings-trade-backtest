@@ -23,9 +23,15 @@ class BacktestConfig:
     target_symbols: Optional[Set[str]] = None
     enable_earnings_date_validation: bool = False
     use_fmp_data: bool = True  # デフォルトでFMPを使用
-    
+
+    # ギャップ上限設定
+    max_gap_percent: float = 10.0  # デフォルト: 10%
+
+    # FMPスクリーナーパラメータ
+    screener_price_min: float = 10.0
+    screener_volume_min: int = 200_000
+
     # 時価総額ベースフィルタリング設定
-    use_market_cap_filter: bool = False  # デフォルトで時価総額フィルタリングを無効化
     min_market_cap: float = 1e9  # 最小時価総額 ($1B)
     max_market_cap: float = 50e9  # 最大時価総額 ($50B)
 

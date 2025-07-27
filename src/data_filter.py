@@ -14,6 +14,7 @@ class DataFilter:
     
     def __init__(self, data_fetcher: DataFetcher, target_symbols: Optional[Set[str]] = None, 
                  pre_earnings_change: float = -10, max_holding_days: int = 90,
+                 max_gap_percent: float = 10.0,
                  enable_date_validation: bool = False, api_key: str = None):
         """DataFilterの初期化"""
         self.data_fetcher = data_fetcher
@@ -21,6 +22,9 @@ class DataFilter:
         self.pre_earnings_change = pre_earnings_change
         self.max_holding_days = max_holding_days
         self.enable_date_validation = enable_date_validation
+        self.max_gap_percent = max_gap_percent
+
+        # FMPスクリーナーは EarningsBacktest 側で実行し、target_symbols に反映済み
         
         # 決算日検証機能の初期化
         self.earnings_validator = None
@@ -69,7 +73,7 @@ class DataFilter:
         print("2. サプライズ率5%以上")
         print("3. 実績値がプラス")
         if self.target_symbols:
-            print("4. 指定銘柄のみ")
+            print("4. 指定銘柄のみ (FMPスクリーナー等で抽出済み)")
         
         first_filtered = []
         skipped_count = 0
@@ -82,12 +86,13 @@ class DataFilter:
                     skipped_count += 1
                     continue
                 
+                # シンボルを取得 (.USを除去)
+                symbol = earning['code'][:-3]
+
                 # ターゲットシンボルのフィルタリング
-                if self.target_symbols is not None:
-                    symbol = earning['code'][:-3]  # .USを除去
-                    if symbol not in self.target_symbols:
-                        skipped_count += 1
-                        continue
+                if self.target_symbols is not None and symbol not in self.target_symbols:
+                    skipped_count += 1
+                    continue
                 
                 # 2&3. サプライズ率と実績値のチェック
                 try:
@@ -123,6 +128,7 @@ class DataFilter:
         print("5. 株価10ドル以上")
         print("6. 20日平均出来高20万株以上")
         print(f"7. 過去20日間の価格変化率{self.pre_earnings_change}%以上")
+        print(f"8. ギャップ上限: {self.max_gap_percent}% 以下")
         
         date_stocks = defaultdict(list)
         processed_count = 0
@@ -269,6 +275,9 @@ class DataFilter:
         """最終的なフィルタリング条件をチェック"""
         if gap < 0:
             tqdm.write("- スキップ: ギャップ率が負")
+            return False
+        if gap > self.max_gap_percent:
+            tqdm.write(f"- スキップ: ギャップ率が{self.max_gap_percent}%を超過")
             return False
         if price < 10:
             tqdm.write("- スキップ: 株価が10ドル未満")
