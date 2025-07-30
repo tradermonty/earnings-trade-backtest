@@ -158,6 +158,32 @@ class TradeExecutor:
             tqdm.write(f"- スキップ: 株価データなし")
             return None
         
+        # DataFrame のカラム名を統一（lower-case -> Capitalize）
+        if 'open' in stock_data.columns:
+            stock_data = stock_data.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
+
+        # 日付インデックスにしておく
+        if 'date' in stock_data.columns:
+            stock_data = stock_data.set_index('date')
+        
+        # 当日の行を取得
+        try:
+            entry_row = stock_data.loc[entry_date]
+        except KeyError:
+            tqdm.write("- スキップ: 当日の株価データなし")
+            return None
+
+        # candidate に価格・ギャップが未設定の場合はここで補完
+        if candidate.get('price') is None:
+            candidate['price'] = entry_row['Open']
+
+        if candidate.get('gap') is None:
+            try:
+                prev_close_tmp = stock_data.loc[:entry_date].iloc[-2]['Close']
+                candidate['gap'] = ((entry_row['Open'] - prev_close_tmp) / prev_close_tmp) * 100
+            except Exception:
+                candidate['gap'] = 0.0
+
         # ポジションサイズの計算
         position_info = self.risk_manager.calculate_position_size(
             self.current_capital, self.position_size, candidate['price'], self.slippage
