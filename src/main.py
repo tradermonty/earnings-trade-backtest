@@ -46,7 +46,12 @@ class EarningsBacktest:
         self.api_key = self.data_fetcher.api_key
         
         # 銘柄リストの取得
-        self.target_symbols = self._get_target_symbols()
+        # config.target_symbols が指定されている場合はそれを優先する
+        if self.config.target_symbols:
+            # 既に set 型で渡されている想定だが、防御的に変換しておく
+            self.target_symbols = set(self.config.target_symbols)
+        else:
+            self.target_symbols = self._get_target_symbols()
         
         # データフィルタリングコンポーネント
         self.data_filter = DataFilter(
@@ -176,7 +181,7 @@ class EarningsBacktest:
             print(f"バックテスト実行中にエラーが発生: {str(e)}")
             logging.error(f"Backtest execution error: {str(e)}")
             raise
-    
+
     def _get_empty_results(self) -> Dict[str, Any]:
         """空の結果を返す"""
         empty_metrics = self.metrics_calculator.calculate_metrics([])

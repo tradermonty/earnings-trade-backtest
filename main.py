@@ -70,7 +70,8 @@ def parse_arguments():
     # 決算日検証
     parser.add_argument('--enable_date_validation', action='store_true',
                         help='Enable earnings date validation using news analysis')
-    
+
+
     # データソース選択 (デフォルト: FMP)
     parser.add_argument('--use_eodhd', action='store_true',
                         help='Use EODHD instead of default FMP data source (requires EODHD_API_KEY)')
