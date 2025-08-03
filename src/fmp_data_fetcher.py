@@ -958,12 +958,14 @@ class FMPDataFetcher:
             'marketCapMoreThan': int(market_cap_more_than),
             'limit': limit,
             # 追加フィルタリング
-            'country': 'US',             # 米国企業のみ
+            'country': 'US',             # 米国企業のみ（パラメータは "US"）
             'isEtf': 'false',            # ETF除外
             'isFund': 'false',           # Fund除外
             'isActivelyTrading': 'true', # 取引停止銘柄除外
             'includeAllShareClasses': 'false'
         }
+
+
         # 第1段階では出来高フィルタを適用しない方針
         # volumeMoreThan パラメータは使用せず、必要に応じて呼び出し側で後段フィルタをかける
 
@@ -1004,11 +1006,32 @@ class FMPDataFetcher:
                     allowed_market = exch in ['NASDAQ', 'NYSE', 'AMEX'] or country == 'US'
 
                 if symbol and allowed_market:
+                    # ETF / Fund は除外
+                    if item.get('isEtf') or item.get('isFund'):
+                        continue
                     # 不要な特殊ティッカーを除外（指数・先物など）
                     if not any(x in symbol for x in ['^', '=']):
                         symbols.append(symbol)
 
         logger.info(f"Stock screener retrieved {len(symbols)} symbols")
         return symbols
+
+    # -------------------------------------------------------------------------
+    # Financial Ratios helpers
+    # -------------------------------------------------------------------------
+    def get_latest_financial_ratios(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Return latest financial ratios for a given symbol (most recent period).
+
+        Uses endpoint `/stable/ratios` with `symbol` and `limit=1`.
+        Returns None when API fails or data missing.
+        """
+        params = {
+            'symbol': symbol.upper(),
+            'limit': 1,
+        }
+        data = self._make_request('ratios', params)
+        if not data or not isinstance(data, list):
+            return None
+        return data[0]
 
 

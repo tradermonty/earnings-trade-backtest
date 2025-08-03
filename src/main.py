@@ -60,6 +60,9 @@ class EarningsBacktest:
             pre_earnings_change=self.config.pre_earnings_change,
             max_holding_days=self.config.max_holding_days,
             max_gap_percent=self.config.max_gap_percent,
+            max_ps_ratio=self.config.max_ps_ratio,
+            max_pe_ratio=self.config.max_pe_ratio,
+            min_profit_margin=self.config.min_profit_margin,
             enable_date_validation=self.config.enable_earnings_date_validation,
             api_key=self.api_key
         )
@@ -112,17 +115,22 @@ class EarningsBacktest:
         # FMP スクリーナーで基本条件を満たす銘柄を取得
         elif getattr(self.data_fetcher, 'fmp_fetcher', None):
             try:
-                screener_list = self.data_fetcher.fmp_fetcher.stock_screener(
-                    price_more_than=self.config.screener_price_min,
-                    market_cap_more_than=self.config.min_market_cap,
-                    market_cap_less_than=self.config.max_market_cap if self.config.max_market_cap < 1e12 else None,
-                    volume_more_than=self.config.screener_volume_min,
-                    limit=10000,
-                    exchange='NYSE,NASDAQ,AMEX'  # 米国主要取引所のみに限定
-                )
-                if screener_list:
-                    symbols.update(screener_list)
-                    print(f"FMPスクリーナーで取得した候補銘柄数: {len(screener_list)}")
+                total = 0
+                exchanges = ['NYSE', 'NASDAQ', 'AMEX']
+                for ex in exchanges:
+                    lst = self.data_fetcher.fmp_fetcher.stock_screener(
+                        price_more_than=self.config.screener_price_min,
+                        market_cap_more_than=self.config.min_market_cap,
+                        market_cap_less_than=self.config.max_market_cap if self.config.max_market_cap < 1e12 else None,
+                        volume_more_than=self.config.screener_volume_min,
+                        limit=10000,
+                        exchange=ex
+                    )
+                    if lst:
+                        print(f"  {ex}: {len(lst)} symbols")
+                        symbols.update(lst)
+                        total += len(lst)
+                print(f"FMPスクリーナー合計取得数: {total} (重複除外後 {len(symbols)})")
             except Exception as e:
                 print(f"FMPスクリーナー取得失敗: {e}")
 
@@ -276,6 +284,9 @@ def create_backtest_from_args(args) -> EarningsBacktest:
         max_market_cap=(args.max_market_cap * 1e9) if args.max_market_cap > 0 else 1e12,
         screener_price_min=args.screener_price_min,
         screener_volume_min=args.screener_volume_min,
+        max_ps_ratio=args.max_ps_ratio,
+        max_pe_ratio=args.max_pe_ratio,
+        min_profit_margin=args.min_profit_margin,
         max_gap_percent=args.max_gap
     )
     

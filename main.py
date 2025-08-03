@@ -87,6 +87,13 @@ def parse_arguments():
                         help='Minimum stock price for FMP screener (default: 10)')
     parser.add_argument('--screener_volume_min', type=int, default=200000,
                         help='Minimum average volume for FMP screener (default: 200,000)')
+    # Fundamental filters
+    parser.add_argument('--max_ps_ratio', type=float, default=None,
+                        help='Maximum P/S ratio for screener (optional)')
+    parser.add_argument('--max_pe_ratio', type=float, default=None,
+                        help='Maximum P/E ratio for screener (optional)')
+    parser.add_argument('--min_profit_margin', type=float, default=None,
+                        help='Minimum profit margin percentage for screener (optional)')
     
     return parser.parse_args()
 

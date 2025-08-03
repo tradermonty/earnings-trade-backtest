@@ -153,15 +153,29 @@ class DataFetcher:
     def _get_earnings_data_fmp(self, start_date: str, end_date: str, target_symbols: Optional[list]) -> Dict[str, Any]:
         """FMPから決算データを取得"""
         try:
+            # --- 決算時刻（BMO/AMC）UTCズレ対策 ---------------------------
+            # 1日分バッファを付けて取得し、取得後に元期間でフィルタ
+            buffer_start = (pd.to_datetime(start_date) - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+            buffer_end   = (pd.to_datetime(end_date)   + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+
             # FMP Bulk APIで一括取得（アメリカ市場のみ）
-            fmp_data = self.fmp_fetcher.get_earnings_calendar(start_date, end_date, target_symbols=target_symbols, us_only=True)
-            
+            fmp_data = self.fmp_fetcher.get_earnings_calendar(buffer_start, buffer_end, target_symbols=target_symbols, us_only=True)
+
             if not fmp_data:
                 print("FMP決算データの取得に失敗しました")
                 return {'earnings': []}
-            
+
             # FMPデータを標準形式に変換
             processed_df = self.fmp_fetcher.process_earnings_data(fmp_data)
+
+            # 取得後にオリジナル期間で日付フィルタを適用
+            if not processed_df.empty:
+                processed_df['report_date'] = pd.to_datetime(processed_df['report_date'])
+                start_dt = pd.to_datetime(start_date)
+                end_dt   = pd.to_datetime(end_date)
+                processed_df = processed_df[(processed_df['report_date'] >= start_dt) & (processed_df['report_date'] <= end_dt)]
+                # DataFilter が文字列形式を想定しているため再度 str へ変換
+                processed_df['report_date'] = processed_df['report_date'].dt.strftime('%Y-%m-%d')
             
             if processed_df.empty:
                 print("FMP決算データの処理結果が空です")
