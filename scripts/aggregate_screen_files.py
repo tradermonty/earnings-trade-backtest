@@ -35,14 +35,20 @@ def calc_trade_date(earnings_datetime: datetime) -> datetime.date:
 
 
 def extract_rows(screen_path: Path, top_n: int) -> pd.DataFrame:
-    """gzip 圧縮された screen_*.csv から先頭 top_n 行を抽出し、Trade Date を算出。"""
+    """gzip 圧縮された screen_*.csv から Score が高い順に top_n 行を抽出し、Trade Date を算出。"""
     with gzip.open(screen_path, "rt", encoding="utf-8") as f:
         df = pd.read_csv(f)
+
+    # Score カラムがある場合は降順で並べ替えて上位 N 件を取得
+    if "Score" in df.columns:
+        df = df.sort_values("Score", ascending=False)
+    elif "score" in df.columns:
+        df = df.sort_values("score", ascending=False)
 
     if top_n > 0:
         df = df.head(top_n)
 
-    # Earnings Date カラムが存在しない場合はスキップ
+    # Earnings Date から Trade Date を算出
     if "Earnings Date" in df.columns:
         dt_series = pd.to_datetime(df["Earnings Date"], errors="coerce")
         trade_dates = dt_series.apply(lambda d: calc_trade_date(d) if pd.notnull(d) else None)

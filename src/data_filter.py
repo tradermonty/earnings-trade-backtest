@@ -12,17 +12,27 @@ from .news_fetcher import NewsFetcher
 class DataFilter:
     """データフィルタリングクラス"""
     
-    def __init__(self, data_fetcher: DataFetcher, target_symbols: Optional[Set[str]] = None, 
+    def __init__(self, data_fetcher: DataFetcher, target_symbols: Optional[Set[str]] = None,
+                 min_surprise_percent: float = 5.0, require_positive_eps: bool = True,
                  pre_earnings_change: float = -10, max_holding_days: int = 90,
                  max_gap_percent: float = 10.0,
+                 max_ps_ratio: float | None = None, max_pe_ratio: float | None = None,
+                 min_profit_margin: float | None = None,
                  enable_date_validation: bool = False, api_key: str = None):
         """DataFilterの初期化"""
         self.data_fetcher = data_fetcher
         self.target_symbols = target_symbols
         self.pre_earnings_change = pre_earnings_change
+        self.min_surprise_percent = min_surprise_percent
+        self.require_positive_eps = require_positive_eps
         self.max_holding_days = max_holding_days
         self.enable_date_validation = enable_date_validation
         self.max_gap_percent = max_gap_percent
+
+        # Fundamental ratio thresholds
+        self.max_ps_ratio = max_ps_ratio
+        self.max_pe_ratio = max_pe_ratio
+        self.min_profit_margin = min_profit_margin
 
         # FMPスクリーナーは EarningsBacktest 側で実行し、target_symbols に反映済み
         
@@ -70,8 +80,11 @@ class DataFilter:
         print("\n=== 第1段階フィルタリング ===")
         print("条件:")
         print("1. .US銘柄のみ")
-        print("2. サプライズ率5%以上")
-        print("3. 実績値がプラス")
+        print(f"2. サプライズ率{self.min_surprise_percent}%以上")
+        if self.require_positive_eps:
+            print("3. 実績値がプラス")
+        else:
+            print("3. 実績値は不問")
         if self.target_symbols:
             print("4. 指定銘柄のみ (FMPスクリーナー等で抽出済み)")
         
@@ -102,7 +115,10 @@ class DataFilter:
                     skipped_count += 1
                     continue
                 
-                if percent < 5 or actual <= 0:
+                if percent < self.min_surprise_percent:
+                    skipped_count += 1
+                    continue
+                if self.require_positive_eps and actual <= 0:
                     skipped_count += 1
                     continue
                 
@@ -148,6 +164,29 @@ class DataFilter:
                 
                 # 銘柄コードから.USを除去
                 symbol = earning['code'][:-3]
+
+                # --- Fundamental ratio filter --------------------------------------
+                if any([self.max_ps_ratio, self.max_pe_ratio, self.min_profit_margin]) and getattr(self.data_fetcher, 'fmp_fetcher', None):
+                    ratios = self.data_fetcher.fmp_fetcher.get_latest_financial_ratios(symbol)
+                    if ratios is None:
+                        skipped_count += 1
+                        tqdm.write(f"- スキップ: Financial ratios 取得失敗")
+                        continue
+                    ps = ratios.get('priceToSalesRatio')
+                    pe = ratios.get('priceToEarningsRatio')
+                    npm = ratios.get('netProfitMargin')
+                    npm_pct = npm * 100 if npm is not None else None
+                    cond = True
+                    if self.max_ps_ratio is not None and (ps is None or ps > self.max_ps_ratio):
+                        cond = False
+                    if self.max_pe_ratio is not None and (pe is None or pe > self.max_pe_ratio):
+                        cond = False
+                    if self.min_profit_margin is not None and (npm_pct is None or npm_pct < self.min_profit_margin):
+                        cond = False
+                    if not cond:
+                        skipped_count += 1
+                        tqdm.write("- スキップ: ファンダメンタル条件未達")
+                        continue
                 
                 tqdm.write(f"\n処理中: {symbol}")
                 tqdm.write(f"- サプライズ率: {float(earning['percent']):.1f}%")

@@ -11,7 +11,7 @@ class BacktestConfig:
     trail_stop_ma: int = 21
     max_holding_days: int = 90
     initial_capital: float = 100000
-    position_size: float = 6
+    position_size: float = 10
     slippage: float = 0.3
     risk_limit: float = 6
     partial_profit: bool = True
@@ -26,6 +26,11 @@ class BacktestConfig:
 
     # ギャップ上限設定
     max_gap_percent: float = 10.0  # デフォルト: 10%
+
+    # FMPスクリーナー追加ファンダメンタル条件
+    max_ps_ratio: float | None = None  # 最大P/S
+    max_pe_ratio: float | None = None  # 最大P/E
+    min_profit_margin: float | None = None  # 最低Profit Margin (%)
 
     # FMPスクリーナーパラメータ
     screener_price_min: float = 10.0
