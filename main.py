@@ -8,6 +8,7 @@ import argparse
 from datetime import datetime, timedelta
 import sys
 import os
+import logging  
 
 # srcディレクトリをパスに追加
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
@@ -95,6 +96,9 @@ def parse_arguments():
     parser.add_argument('--min_profit_margin', type=float, default=None,
                         help='Minimum profit margin percentage for screener (optional)')
     
+    parser.add_argument('--log_level', default='INFO',
+                    choices=['DEBUG','INFO','WARNING','ERROR','CRITICAL'])
+    
     return parser.parse_args()
 
 
@@ -122,6 +126,12 @@ def main():
     """メイン関数"""
     # コマンドライン引数の解析
     args = parse_arguments()
+    
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(levelname)s:%(name)s:%(message)s",
+        force=True
+    )
     
     # 日付の妥当性チェック
     validate_dates(args)
