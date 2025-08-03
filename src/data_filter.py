@@ -233,7 +233,7 @@ class DataFilter:
                 trade_date_data, prev_day_data, _ = trade_result
 
                 # --- Intraday gap using pre-open price (09:25 ET) ---
-                pre_open_price = self.data_fetcher.fmp_fetcher.get_preopen_price(symbol, trade_date)
+                pre_open_price = self.data_fetcher.get_preopen_price(symbol, trade_date)
                 if pre_open_price is None:
                     skipped_count += 1
                     tqdm.write(f"- スキップ: プレオープン価格取得失敗 ({symbol} {trade_date})")
