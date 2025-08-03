@@ -1045,6 +1045,7 @@ class FMPDataFetcher:
         params = {
             'from': trade_date,
             'to': trade_date,
+            'prepost': 'true',
         }
         data = self._make_request(endpoint, params)
         if not data or not isinstance(data, list):

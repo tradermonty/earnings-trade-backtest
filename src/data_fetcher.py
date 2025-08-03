@@ -30,6 +30,15 @@ class DataFetcher:
                 self.fmp_fetcher = None
         else:
             self.fmp_fetcher = None
+
+        # Alpaca intraday fetcher (optional)
+        try:
+            from .alpaca_data_fetcher import AlpacaDataFetcher
+            self.alpaca_fetcher = AlpacaDataFetcher(account_type=os.getenv('ALPACA_ACCOUNT_TYPE', 'live'))
+            logging.info("AlpacaDataFetcher initialised for intraday data")
+        except Exception as e:
+            self.alpaca_fetcher = None
+            logging.info(f"AlpacaDataFetcher not available: {e}")
     
     def _load_api_key(self) -> str:
         """EODHDのAPIキーを読み込む"""
@@ -253,6 +262,16 @@ class DataFetcher:
         except Exception as e:
             print(f"EODHD決算データの取得中にエラーが発生: {str(e)}")
             raise
+
+    def get_preopen_price(self, symbol: str, trade_date: str) -> Optional[float]:
+        """Return pre-open price using FMP first then Alpaca fallback."""
+        if self.fmp_fetcher:
+            price = self.fmp_fetcher.get_preopen_price(symbol, trade_date)
+            if price is not None:
+                return price
+        if getattr(self, 'alpaca_fetcher', None):
+            return self.alpaca_fetcher.get_preopen_price(symbol, trade_date)
+        return None
 
     def get_historical_data(self, symbol: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
         """
