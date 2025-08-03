@@ -1048,7 +1048,9 @@ class FMPDataFetcher:
         }
         data = self._make_request(endpoint, params)
         if not data or not isinstance(data, list):
+            logger.debug(f"Intraday API returned no data for {symbol} {trade_date}")
             return None
+        logger.debug(f"Intraday rows for {symbol} {trade_date}: {len(data)}")
         target_prefix = f"{trade_date} {pre_open_time}"
         for item in data:
             if item.get('date', '').startswith(target_prefix):
@@ -1059,6 +1061,7 @@ class FMPDataFetcher:
         # fallback: last 09:2x record
         candidates = [item for item in data if item.get('date', '').startswith(f"{trade_date} 09:2")]
         if not candidates:
+            logger.debug(f"No 09:2x records for {symbol} {trade_date}. First times: {[i['date'] for i in data[:3]]}")
             return None
         try:
             return float(candidates[-1]['open'])

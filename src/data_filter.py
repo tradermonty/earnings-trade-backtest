@@ -236,7 +236,7 @@ class DataFilter:
                 pre_open_price = self.data_fetcher.fmp_fetcher.get_preopen_price(symbol, trade_date)
                 if pre_open_price is None:
                     skipped_count += 1
-                    tqdm.write("- スキップ: プレオープン価格取得失敗")
+                    tqdm.write(f"- スキップ: プレオープン価格取得失敗 ({symbol} {trade_date})")
                     continue
                 gap = (pre_open_price - prev_day_data['Close']) / prev_day_data['Close'] * 100
 
