@@ -1034,4 +1034,34 @@ class FMPDataFetcher:
             return None
         return data[0]
 
+    # -------------------------------------------------------------------------
+    # Intraday pre-market helpers
+    # -------------------------------------------------------------------------
+    def get_preopen_price(self, symbol: str, trade_date: str, pre_open_time: str = "09:25:00") -> Optional[float]:
+        """Return the price at pre-open time (default 09:25 ET) for given trade_date using 1-min intraday data.
+        Requires Premium API (date filter). Returns None if data not available.
+        """
+        endpoint = f"historical-chart/1min/{symbol.upper()}"
+        params = {
+            'from': trade_date,
+            'to': trade_date,
+        }
+        data = self._make_request(endpoint, params)
+        if not data or not isinstance(data, list):
+            return None
+        target_prefix = f"{trade_date} {pre_open_time}"
+        for item in data:
+            if item.get('date', '').startswith(target_prefix):
+                try:
+                    return float(item['open'])
+                except (TypeError, ValueError):
+                    return None
+        # fallback: last 09:2x record
+        candidates = [item for item in data if item.get('date', '').startswith(f"{trade_date} 09:2")]
+        if not candidates:
+            return None
+        try:
+            return float(candidates[-1]['open'])
+        except (TypeError, ValueError):
+            return None
 
