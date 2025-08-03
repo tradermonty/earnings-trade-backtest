@@ -264,13 +264,15 @@ class DataFetcher:
             raise
 
     def get_preopen_price(self, symbol: str, trade_date: str) -> Optional[float]:
-        """Return pre-open price using FMP first then Alpaca fallback."""
-        if self.fmp_fetcher:
-            price = self.fmp_fetcher.get_preopen_price(symbol, trade_date)
+        """Return pre-open price using Alpaca first then FMP fallback."""
+        # Prefer Alpaca intraday (pre/post market対応)
+        if getattr(self, 'alpaca_fetcher', None):
+            price = self.alpaca_fetcher.get_preopen_price(symbol, trade_date)
             if price is not None:
                 return price
-        if getattr(self, 'alpaca_fetcher', None):
-            return self.alpaca_fetcher.get_preopen_price(symbol, trade_date)
+        # Fallback to FMP if Alpaca unavailable or returns None
+        if self.fmp_fetcher:
+            return self.fmp_fetcher.get_preopen_price(symbol, trade_date)
         return None
 
     def get_historical_data(self, symbol: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
