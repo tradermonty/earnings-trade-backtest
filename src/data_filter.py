@@ -1,5 +1,5 @@
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from collections import defaultdict
 from typing import Dict, List, Any, Optional, Set
 from tqdm import tqdm
@@ -230,12 +230,20 @@ class DataFilter:
                     skipped_count += 1
                     continue
                 
-                trade_date_data, prev_day_data, gap = trade_result
+                trade_date_data, prev_day_data, _ = trade_result
+
+                # --- Intraday gap using pre-open price (09:25 ET) ---
+                pre_open_price = self.data_fetcher.fmp_fetcher.get_preopen_price(symbol, trade_date)
+                if pre_open_price is None:
+                    skipped_count += 1
+                    tqdm.write("- スキップ: プレオープン価格取得失敗")
+                    continue
+                gap = (pre_open_price - prev_day_data['Close']) / prev_day_data['Close'] * 100
 
                 # 平均出来高を計算
                 avg_volume = stock_data['Volume'].tail(20).mean()
                 
-                tqdm.write(f"- ギャップ率: {gap:.1f}%")
+                tqdm.write(f"- ギャップ率: {gap:.1f}% (pre-open)")
                 tqdm.write(f"- 株価: ${trade_date_data['Open']:.2f}")
                 tqdm.write(f"- 平均出来高: {avg_volume:,.0f}")
                 
