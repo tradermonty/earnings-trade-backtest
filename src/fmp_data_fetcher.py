@@ -322,7 +322,9 @@ class FMPDataFetcher:
             決算データリスト
         """
         # 特定銘柄のみの場合は、個別銘柄APIを使用（効率的）
-        if target_symbols and len(target_symbols) <= 10:
+        # 注意: 個別APIは実績値(eps)を返さないため、現在は無効化
+        # バルクAPIを常に使用してv3とv4のデータを統合
+        if False and target_symbols and len(target_symbols) <= 10:
             logger.info(f"Using individual symbol API for {len(target_symbols)} symbols")
             specific_earnings = self._get_earnings_for_specific_symbols(target_symbols, from_date, to_date)
             
@@ -384,7 +386,23 @@ class FMPDataFetcher:
             }
             
             logger.info(f"Fetching chunk: {params['from']} to {params['to']}")
-            chunk_data = self._make_request('earnings-calendar', params)
+            
+            # v3とv4の両方からデータを取得して統合
+            # v3: time フィールドを取得
+            # v4: 実績値(eps, revenue)を取得
+            
+            # v3 API呼び出し
+            original_base = self.base_url
+            self.base_url = self.alt_base_url  # v3に切り替え
+            v3_data = self._make_request('earning_calendar', params)  # v3では earning_calendar (単数形)
+            self.base_url = original_base  # 元に戻す
+            
+            # v4 API呼び出し（実績値取得用）
+            v4_data = self._make_request('earnings-calendar', params)
+            
+            # データ統合: v3をベースにv4のデータで補完
+            chunk_data = self._merge_earnings_data(v3_data, v4_data)
+            
             
             if chunk_data is None:
                 logger.warning(f"Failed to fetch data for {params['from']} to {params['to']}")
@@ -653,6 +671,64 @@ class FMPDataFetcher:
             logger.info(f"Processed {len(df)} earnings records")
         
         return df
+    
+    def _merge_earnings_data(self, v3_data: Optional[List[Dict]], v4_data: Optional[List[Dict]]) -> Optional[List[Dict]]:
+        """
+        v3とv4のデータを統合
+        v3: timeフィールドを持つ
+        v4: 実績値を持つ場合がある
+        
+        Args:
+            v3_data: v3 APIのデータ
+            v4_data: v4 APIのデータ
+            
+        Returns:
+            統合されたデータ
+        """
+        # v3データがない場合はv4を返す
+        if not v3_data:
+            logger.warning("v3 API returned no data, using v4 data only")
+            return v4_data
+        
+        # v4データがない場合はv3を返す
+        if not v4_data:
+            logger.info("v4 API returned no data, using v3 data only")
+            return v3_data
+        
+        # v4データを辞書に変換（高速検索用）
+        v4_dict = {}
+        for item in v4_data:
+            key = (item.get('symbol', ''), item.get('date', ''))
+            v4_dict[key] = item
+        
+        # v3データをベースに、v4のデータで補完
+        merged_data = []
+        for v3_item in v3_data:
+            symbol = v3_item.get('symbol', '')
+            date = v3_item.get('date', '')
+            key = (symbol, date)
+            
+            # v3データをコピー
+            merged_item = v3_item.copy()
+            
+            # v4データが存在する場合、実績値を上書き
+            if key in v4_dict:
+                v4_item = v4_dict[key]
+                # v4の実績値でv3を更新（v4にある場合のみ）
+                if v4_item.get('eps') is not None:
+                    merged_item['eps'] = v4_item['eps']
+                if v4_item.get('revenue') is not None:
+                    merged_item['revenue'] = v4_item['revenue']
+                # その他の有用なフィールドも更新
+                if v4_item.get('epsActual') is not None:
+                    merged_item['epsActual'] = v4_item['epsActual']
+                if v4_item.get('revenueActual') is not None:
+                    merged_item['revenueActual'] = v4_item['revenueActual']
+            
+            merged_data.append(merged_item)
+        
+        logger.info(f"Merged {len(merged_data)} records (v3: {len(v3_data)}, v4: {len(v4_data)})")
+        return merged_data
     
     def _parse_timing(self, time_str: str) -> str:
         """
