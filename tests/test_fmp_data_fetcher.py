@@ -30,9 +30,9 @@ class TestFMPDataFetcher(unittest.TestCase):
         """API key付きの初期化テスト"""
         fetcher = FMPDataFetcher(api_key="test_key")
         self.assertEqual(fetcher.api_key, "test_key")
-        self.assertEqual(fetcher.base_url, "https://financialmodelingprep.com/stable")
-        self.assertEqual(fetcher.calls_per_minute, 600)
-        self.assertEqual(fetcher.calls_per_second, 10)
+        self.assertEqual(fetcher.base_url, "https://financialmodelingprep.com/api/v3")
+        self.assertEqual(fetcher.calls_per_minute, 750)
+        self.assertEqual(fetcher.calls_per_second, 12.5)
 
     def test_initialization_without_api_key(self):
         """API keyなしの初期化テスト（エラーケース）"""
