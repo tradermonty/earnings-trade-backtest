@@ -32,8 +32,9 @@ class FMPDataFetcher:
         if not self.api_key:
             raise ValueError("FMP API key is required. Set FMP_API_KEY environment variable.")
         
-        self.base_url = "https://financialmodelingprep.com/stable"
-        self.alt_base_url = "https://financialmodelingprep.com/api/v3"
+        # Use v3 as the primary API endpoint (stable endpoints have limited availability)
+        self.base_url = "https://financialmodelingprep.com/api/v3"
+        self.alt_base_url = "https://financialmodelingprep.com/api/v4"
         self.session = requests.Session()
         
         # Maximum performance rate limiting - 750 calls/minフル活用
@@ -586,13 +587,13 @@ class FMPDataFetcher:
         # Try different endpoints - profile data is only available on v3 API
         norm_symbol = self._normalize_symbol(symbol)
         endpoints_to_try = [
-            ('v3', f'profile/{norm_symbol}'),      # v3 endpoint (correct one)
-            ('stable', f'profile/{norm_symbol}'),  # stable endpoint (backup)
+            ('v3', f'profile/{norm_symbol}'),      # v3 endpoint (primary)
+            ('v4', f'profile/{norm_symbol}'),      # v4 endpoint (backup)
         ]
         
         data = None
         for api_version, endpoint in endpoints_to_try:
-            base_url = self.base_url if api_version == 'stable' else self.alt_base_url
+            base_url = self.base_url if api_version == 'v3' else self.alt_base_url
             logger.debug(f"Trying {api_version} endpoint for profile: {endpoint}")
             
             # Temporarily override base URL for this request
@@ -804,11 +805,7 @@ class FMPDataFetcher:
         # Try different endpoint formats and base URLs for FMP
         normalized_symbol = self._normalize_symbol(symbol)
         endpoints_to_try = [
-            # Stable API endpoints
-            ('stable', f'historical-price-full/{normalized_symbol}'),
-            ('stable', f'historical-chart/1day/{normalized_symbol}'),
-            ('stable', f'historical/{normalized_symbol}'),
-            # API v3 endpoints
+            # API v3 endpoints (correct endpoints for historical data)
             ('v3', f'historical-price-full/{normalized_symbol}'),
             ('v3', f'historical-chart/1day/{normalized_symbol}'),
             ('v3', f'historical-daily-prices/{normalized_symbol}'),
@@ -823,7 +820,7 @@ class FMPDataFetcher:
         successful_endpoint = None
         
         for api_version, endpoint in endpoints_to_try:
-            base_url = self.base_url if api_version == 'stable' else self.alt_base_url
+            base_url = self.base_url if api_version == 'v3' else self.alt_base_url
             logger.debug(f"Trying {api_version} endpoint: {endpoint}")
             
             # Temporarily override base URL for this request
@@ -1050,9 +1047,9 @@ class FMPDataFetcher:
         if exchange:
             params['exchange'] = exchange
 
-        # エンドポイント候補。Premium/stable と v3 で名称が異なることがある
+        # エンドポイント候補。v3/v4で名称が異なることがある
         endpoints = [
-            'company-screener',   # 推奨（stable）
+            'stock-screener',     # 推奨（v3）
             'stock_screener',     # v3 の別名
             'stock-screener',     # ハイフン形式
             'screener'            # 古い形式
@@ -1098,7 +1095,7 @@ class FMPDataFetcher:
     def get_latest_financial_ratios(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Return latest financial ratios for a given symbol (most recent period).
 
-        Uses endpoint `/stable/ratios` with `symbol` and `limit=1`.
+        Uses endpoint `/v3/ratios` with `symbol` and `limit=1`.
         Returns None when API fails or data missing.
         """
         params = {
