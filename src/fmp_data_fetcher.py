@@ -220,25 +220,25 @@ class FMPDataFetcher:
             data = self._make_request(endpoint, params)
             
             if not data:
-                # フォールバック1: historical/earning_calendar を試す（正しいエンドポイント）
+                # フォールバック1: historical/earning_calendar を試す（v3エンドポイント）
                 logger.debug(f"earnings-surprises failed for {symbol}, trying historical/earning_calendar")
-                # v3 APIを使用
+                # v3 APIを使用（self.base_urlがv3、self.alt_base_urlがv4）
                 original_base = self.base_url
-                self.base_url = self.alt_base_url
+                # Note: base_url is already v3, so no need to change
                 endpoint = f'historical/earning_calendar/{norm_symbol}'
                 data = self._make_request(endpoint, params)
-                self.base_url = original_base
+                # base_url unchanged since we're already on v3
             
             if not data:
                 # フォールバック2: v3 earnings APIを試す
                 logger.debug(f"historical/earning_calendar failed for {symbol}, trying v3 earnings API")
-                # base_urlを一時的にv3に変更
+                # v3 APIを使用（base_urlは既にv3）
                 original_base = self.base_url
-                self.base_url = self.alt_base_url
+                # Note: base_url is already v3, so no need to change
                 endpoint = f'earnings/{norm_symbol}'
                 params = {'limit': 80}
                 data = self._make_request(endpoint, params)
-                self.base_url = original_base
+                # base_url unchanged since we're already on v3
             
             if data:
                 # dataがリストでない場合の処理
@@ -392,17 +392,29 @@ class FMPDataFetcher:
             # v3: time フィールドを取得
             # v4: 実績値(eps, revenue)を取得
             
-            # v3 API呼び出し
-            original_base = self.base_url
-            self.base_url = self.alt_base_url  # v3に切り替え
+            # v3 API呼び出し（base_urlは既にv3）
+            logger.debug(f"Calling v3 API: earning_calendar with params {params}")
             v3_data = self._make_request('earning_calendar', params)  # v3では earning_calendar (単数形)
-            self.base_url = original_base  # 元に戻す
+            logger.debug(f"v3 API response: {len(v3_data) if v3_data else 0} records")
+            if v3_data and len(v3_data) > 0:
+                logger.debug(f"v3 sample data (first 3): {v3_data[:3]}")
             
             # v4 API呼び出し（実績値取得用）
-            v4_data = self._make_request('earnings-calendar', params)
+            original_base = self.base_url
+            self.base_url = self.alt_base_url  # v4に切り替え
+            logger.debug(f"Calling v4 API: earnings-calendar with params {params}")
+            v4_data = self._make_request('earnings-calendar', params)  # v4では earnings-calendar (複数形)
+            logger.debug(f"v4 API response: {len(v4_data) if v4_data else 0} records")
+            if v4_data and len(v4_data) > 0:
+                logger.debug(f"v4 sample data (first 3): {v4_data[:3]}")
+            self.base_url = original_base  # v3に戻す
             
             # データ統合: v3をベースにv4のデータで補完
+            logger.debug(f"Merging v3 ({len(v3_data) if v3_data else 0}) and v4 ({len(v4_data) if v4_data else 0}) data")
             chunk_data = self._merge_earnings_data(v3_data, v4_data)
+            logger.debug(f"Merged result: {len(chunk_data) if chunk_data else 0} records")
+            if chunk_data and len(chunk_data) > 0:
+                logger.debug(f"Merged sample data (first 3): {chunk_data[:3]}")
             
             
             if chunk_data is None:
@@ -536,7 +548,7 @@ class FMPDataFetcher:
                                     'symbol': symbol,
                                     'date': earning.get('date'),
                                     'epsActual': earning.get('actualEarningResult'),
-                                    'epsEstimate': earning.get('estimatedEarning'),
+                                    'epsEstimated': earning.get('estimatedEarning'),  # Fixed: use 'epsEstimated' instead of 'epsEstimate'
                                     'time': None,  # Not available in Starter
                                     'revenueActual': None,  # Not available in earnings-surprises
                                     'revenueEstimate': None,  # Not available in earnings-surprises
@@ -630,10 +642,17 @@ class FMPDataFetcher:
         if not earnings_data:
             return pd.DataFrame()
         
+        logger.debug(f"process_earnings_data called with {len(earnings_data)} records")
+        if earnings_data:
+            logger.debug(f"First 3 raw earnings data: {earnings_data[:3]}")
+        
         processed_data = []
         
-        for earning in earnings_data:
+        for i, earning in enumerate(earnings_data):
             try:
+                if i < 5:  # 最初の5件をデバッグ出力
+                    logger.debug(f"Processing earning {i}: {earning}")
+                
                 # FMPデータ構造に基づく処理
                 processed_earning = {
                     'code': earning.get('symbol', '') + '.US',  # .US suffix for compatibility
@@ -641,27 +660,35 @@ class FMPDataFetcher:
                     'date': earning.get('date', ''),  # 実際の決算日
                     'before_after_market': self._parse_timing(earning.get('time', '')),
                     'currency': 'USD',  # FMPは主にUSDデータ
-                    'actual': self._safe_float(earning.get('epsActual')),
+                    'actual': self._safe_float(earning.get('eps')),  # 修正: epsActual → eps
                     'estimate': self._safe_float(earning.get('epsEstimated')),  # FMP uses 'epsEstimated'
                     'difference': 0,  # 後で計算
                     'percent': 0,     # 後で計算
-                    'revenue_actual': self._safe_float(earning.get('revenueActual')),
-                    'revenue_estimate': self._safe_float(earning.get('revenueEstimate')),
+                    'revenue_actual': self._safe_float(earning.get('revenue')),  # 修正: revenueActual → revenue
+                    'revenue_estimate': self._safe_float(earning.get('revenueEstimated')),
                     'updated_from_date': earning.get('updatedFromDate', ''),
                     'fiscal_date_ending': earning.get('fiscalDateEnding', ''),
                     'data_source': 'FMP'
                 }
+                
+                if i < 5:
+                    logger.debug(f"Processed earning {i} - actual: {processed_earning['actual']}, estimate: {processed_earning['estimate']}")
                 
                 # サプライズ率計算
                 if processed_earning['actual'] is not None and processed_earning['estimate'] is not None:
                     if processed_earning['estimate'] != 0:
                         processed_earning['difference'] = processed_earning['actual'] - processed_earning['estimate']
                         processed_earning['percent'] = (processed_earning['difference'] / abs(processed_earning['estimate'])) * 100
+                        if i < 5:
+                            logger.debug(f"Calculated percent for {i}: {processed_earning['percent']}%")
+                else:
+                    if i < 5:
+                        logger.debug(f"Could not calculate percent for {i} - actual: {processed_earning['actual']}, estimate: {processed_earning['estimate']}")
                 
                 processed_data.append(processed_earning)
                 
             except Exception as e:
-                logger.warning(f"Error processing earning data: {e}")
+                logger.warning(f"Error processing earning data {i}: {e}")
                 continue
         
         df = pd.DataFrame(processed_data)
@@ -669,7 +696,8 @@ class FMPDataFetcher:
         if not df.empty:
             # 日付でソート
             df = df.sort_values('report_date')
-            logger.info(f"Processed {len(df)} earnings records")
+            logger.debug(f"Final processed DataFrame: {len(df)} records")
+            logger.debug(f"Sample processed data: {df.head(3).to_dict('records')}")
         
         return df
     
@@ -686,25 +714,33 @@ class FMPDataFetcher:
         Returns:
             統合されたデータ
         """
+        logger.debug(f"_merge_earnings_data called with v3_data={len(v3_data) if v3_data else 0}, v4_data={len(v4_data) if v4_data else 0}")
+        
         # v3データがない場合はv4を返す
         if not v3_data:
-            logger.warning("v3 API returned no data, using v4 data only")
+            logger.debug("v3 API returned no data, using v4 data only")
+            if v4_data:
+                logger.debug(f"Returning v4 data sample: {v4_data[:2]}")
             return v4_data
         
         # v4データがない場合はv3を返す
         if not v4_data:
-            logger.info("v4 API returned no data, using v3 data only")
+            logger.debug("v4 API returned no data, using v3 data only")
+            if v3_data:
+                logger.debug(f"Returning v3 data sample: {v3_data[:2]}")
             return v3_data
         
         # v4データを辞書に変換（高速検索用）
         v4_dict = {}
-        for item in v4_data:
+        for i, item in enumerate(v4_data):
             key = (item.get('symbol', ''), item.get('date', ''))
             v4_dict[key] = item
+            if i < 3:  # 最初の3件をデバッグ出力
+                logger.debug(f"v4_dict key={key}, item fields: {list(item.keys())}")
         
         # v3データをベースに、v4のデータで補完
         merged_data = []
-        for v3_item in v3_data:
+        for i, v3_item in enumerate(v3_data):
             symbol = v3_item.get('symbol', '')
             date = v3_item.get('date', '')
             key = (symbol, date)
@@ -712,23 +748,44 @@ class FMPDataFetcher:
             # v3データをコピー
             merged_item = v3_item.copy()
             
+            if i < 3:  # 最初の3件をデバッグ出力
+                logger.debug(f"Processing v3 item {i}: symbol={symbol}, date={date}, fields: {list(v3_item.keys())}")
+                logger.debug(f"v3 item values: {v3_item}")
+            
             # v4データが存在する場合、実績値を上書き
             if key in v4_dict:
                 v4_item = v4_dict[key]
+                if i < 3:
+                    logger.debug(f"Found matching v4 data for {key}: {v4_item}")
+                
                 # v4の実績値でv3を更新（v4にある場合のみ）
                 if v4_item.get('eps') is not None:
                     merged_item['eps'] = v4_item['eps']
+                    if i < 3:
+                        logger.debug(f"Updated eps from v4: {v4_item['eps']}")
                 if v4_item.get('revenue') is not None:
                     merged_item['revenue'] = v4_item['revenue']
+                    if i < 3:
+                        logger.debug(f"Updated revenue from v4: {v4_item['revenue']}")
                 # その他の有用なフィールドも更新
                 if v4_item.get('epsActual') is not None:
                     merged_item['epsActual'] = v4_item['epsActual']
+                    if i < 3:
+                        logger.debug(f"Updated epsActual from v4: {v4_item['epsActual']}")
                 if v4_item.get('revenueActual') is not None:
                     merged_item['revenueActual'] = v4_item['revenueActual']
+                    if i < 3:
+                        logger.debug(f"Updated revenueActual from v4: {v4_item['revenueActual']}")
+            else:
+                if i < 3:
+                    logger.debug(f"No matching v4 data found for {key}")
+            
+            if i < 3:
+                logger.debug(f"Final merged item {i}: {merged_item}")
             
             merged_data.append(merged_item)
         
-        logger.info(f"Merged {len(merged_data)} records (v3: {len(v3_data)}, v4: {len(v4_data)})")
+        logger.debug(f"Merged {len(merged_data)} records (v3: {len(v3_data)}, v4: {len(v4_data)})")
         return merged_data
     
     def _parse_timing(self, time_str: str) -> str:
