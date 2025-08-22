@@ -80,9 +80,9 @@ class DataFilter:
         print("\n=== 第1段階フィルタリング ===")
         print("条件:")
         print("1. .US銘柄のみ")
-        print(f"2. サプライズ率{self.min_surprise_percent}%以上")
+        print(f"2. サプライズ率{self.min_surprise_percent}%以上 (実績値ありの場合のみ)")
         if self.require_positive_eps:
-            print("3. 実績値がプラス")
+            print("3. 実績値がプラス (実績値ありの場合のみ)")
         else:
             print("3. 実績値は不問")
         if self.target_symbols:
@@ -97,6 +97,7 @@ class DataFilter:
                 # 1. .US銘柄のチェック
                 if not earning['code'].endswith('.US'):
                     skipped_count += 1
+                    tqdm.write(f"DEBUG: スキップ - 非US銘柄: {earning['code']}")
                     continue
                 
                 # シンボルを取得 (.USを除去)
@@ -105,23 +106,37 @@ class DataFilter:
                 # ターゲットシンボルのフィルタリング
                 if self.target_symbols is not None and symbol not in self.target_symbols:
                     skipped_count += 1
+                    tqdm.write(f"DEBUG: スキップ - 対象外銘柄: {symbol}")
                     continue
                 
                 # 2&3. サプライズ率と実績値のチェック
                 try:
                     percent = float(earning.get('percent', 0))
-                    actual = float(earning.get('actual', 0))
+                    actual = earning.get('actual')
+                    # actualがNoneでない場合のみ数値に変換
+                    if actual is not None:
+                        actual = float(actual)
                 except (ValueError, TypeError):
                     skipped_count += 1
+                    tqdm.write(f"DEBUG: スキップ - データ変換エラー: {symbol} (percent: {earning.get('percent')}, actual: {earning.get('actual')})")
                     continue
                 
-                if percent < self.min_surprise_percent:
+                # デバッグ: 現在の値を表示
+                tqdm.write(f"DEBUG: 処理中 {symbol} - actual: {actual}, percent: {percent}%")
+                
+                # 実績値が存在する（決算発表済み）場合のみサプライズ率をチェック
+                if actual is not None and percent < self.min_surprise_percent:
                     skipped_count += 1
-                    continue
-                if self.require_positive_eps and actual <= 0:
-                    skipped_count += 1
+                    tqdm.write(f"DEBUG: スキップ - サプライズ率不足: {symbol} ({percent}% < {self.min_surprise_percent}%)")
                     continue
                 
+                # 実績値チェック: actualがNoneの場合（将来の決算）はスキップしない
+                if self.require_positive_eps and actual is not None and actual <= 0:
+                    skipped_count += 1
+                    tqdm.write(f"DEBUG: スキップ - 実績値非正: {symbol} (actual: {actual})")
+                    continue
+                
+                tqdm.write(f"DEBUG: ✓ 通過: {symbol} - actual: {actual}, percent: {percent}%")
                 first_filtered.append(earning)
                 
             except Exception as e:
