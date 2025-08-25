@@ -4,13 +4,14 @@
 
 A comprehensive backtesting system for earnings-based swing trading strategies, specialized for mid and small-cap stocks. Originally developed with EODHD API, the system has migrated to **FinancialModelingPrep (FMP) API** for significantly improved earnings date accuracy.
 
-## ✨ Latest Updates (2025.07)
+## ✨ Latest Updates (2025.08)
 
-- **🔄 Data Source Migration**: Migrated from EODHD to FMP due to low date accuracy issues
-- **🎯 99.7% Accuracy**: FMP integration achieves 99.7% earnings date accuracy (vs 44% with EODHD)
-- **⚡ Enhanced Performance**: Stronger rate limiting and optimized API calls
-- **🔧 Simplified Architecture**: Automatic data source selection with fallback
-- **📊 Comprehensive Testing**: 44+ test cases ensuring production reliability
+- **🚀 Dynamic Position Sizing**: Advanced position sizing based on market conditions and risk metrics
+- **📊 Alpaca Integration**: Real-time pre-market price data via Alpaca API for improved entry timing
+- **🔄 Data Source Migration**: Migrated from EODHD to FMP for 99.7% earnings date accuracy
+- **🎯 Enhanced Filtering**: Two-stage filtering pipeline with technical and fundamental screens
+- **⚡ Modular Architecture**: Reorganized codebase with clear separation of concerns
+- **📈 Advanced Analytics**: Market breadth analysis, sector rotation, and XGBoost feature analysis
 
 ## 🚀 Quick Start
 
@@ -18,8 +19,9 @@ A comprehensive backtesting system for earnings-based swing trading strategies, 
 
 - Python 3.11 or higher
 - **[FinancialModelingPrep API](https://site.financialmodelingprep.com/) key (Premium plan, required)**
-  - ⚠️ **Note**: FMP Premium plan only provides earnings data for the past ~5 years (from August 2020 onwards)
-- (Optional) [EODHD API](https://eodhistoricaldata.com/) key (Advanced plan, for historical data before 2020)
+  - ⚠️ **Note**: FMP Premium plan only provides earnings data from August 2020 onwards
+- (Optional) [EODHD API](https://eodhistoricaldata.com/) key (for historical data before 2020)
+- (Optional) [Alpaca API](https://alpaca.markets/) key (for real-time pre-market data)
 
 ### Installation
 
@@ -46,8 +48,12 @@ Create a `.env` file and configure your API key(s):
 # Primary data source (99.7% accuracy) - Required
 FMP_API_KEY=your_fmp_api_key
 
-# Fallback data source (optional) - Only needed if you want EODHD fallback
+# Optional: Fallback data source for historical data before 2020
 # EODHD_API_KEY=your_eodhd_api_key
+
+# Optional: Real-time pre-market data
+# ALPACA_API_KEY=your_alpaca_api_key
+# ALPACA_SECRET_KEY=your_alpaca_secret_key
 ```
 
 ### Basic Execution
@@ -87,19 +93,25 @@ earnings-trade-backtest/
 ├── src/                               # Core source code modules
 │   ├── data_fetcher.py               # Unified data retrieval (FMP/EODHD)
 │   ├── fmp_data_fetcher.py           # FMP-specific optimized API client
+│   ├── alpaca_data_fetcher.py        # Alpaca real-time data integration
 │   ├── earnings_date_validator.py    # EODHD date validation (legacy)
 │   ├── news_fetcher.py               # Earnings news enrichment
-│   ├── data_filter.py                # Earnings and technical filters
+│   ├── data_filter.py                # Two-stage filtering pipeline
 │   ├── trade_executor.py             # Trade execution simulation
 │   ├── risk_manager.py               # Risk management system
 │   ├── analysis_engine.py            # Advanced performance analysis
 │   ├── report_generator.py           # Enhanced HTML/CSV report generation
 │   ├── metrics_calculator.py         # Trading metrics calculation
 │   ├── config.py                     # Configuration management
+│   ├── dynamic_position/             # Dynamic position sizing module
 │   └── main.py                       # Modular main execution
+├── scripts/                          # Utility and analysis scripts
+│   ├── analysis/                     # Performance and strategy analysis
+│   ├── comparison/                   # Result comparison tools
+│   ├── dynamic/                      # Dynamic position sizing scripts
+│   └── ...                          # Data validation utilities
 ├── tests/                            # Comprehensive test suite (44+ tests)
 ├── reports/                          # Generated analysis reports
-├── scripts/                          # Analysis and validation scripts
 ├── docs/                             # Documentation and screenshots
 ├── main.py                          # Main entry point
 ├── README.md                        # This file
@@ -109,13 +121,18 @@ earnings-trade-backtest/
 
 ## 🎯 Strategy Overview
 
-### 1. Entry Conditions
+### 1. Entry Conditions (Two-Stage Filtering)
+
+**Stage 1 - Earnings Filter:**
 - **Earnings Surprise**: ≥5% above analyst expectations
-- **Gap Up**: Post-earnings price movement ≥0%
-- **Market**: **US stocks only** (automatically filtered)
-- **Volume**: ≥2x average daily volume (20-day)
+- **Positive Earnings**: Actual EPS > 0
+- **Market**: US stocks only (automatically filtered)
+
+**Stage 2 - Technical Filter:**
+- **Gap Up**: Opening gap ≥0% (configurable max gap)
 - **Price Filter**: ≥$10 (excludes penny stocks)
-- **Liquidity**: ≥200k shares average daily volume
+- **Volume**: 20-day average ≥200k shares
+- **Pre-earnings Movement**: Configurable minimum price change in 20 days before earnings
 
 ### 2. Exit Conditions
 - **Stop Loss**: 6% loss triggers automatic exit
@@ -124,10 +141,11 @@ earnings-trade-backtest/
 - **Partial Profit**: 35% position exit at 8% gain (day 1)
 
 ### 3. Risk Management
-- **Position Size**: 6% of capital per trade
+- **Position Size**: 6-10% of capital per trade (configurable)
+- **Dynamic Sizing**: Optional market-condition-based position adjustment
 - **Margin Control**: Maximum 1.5x leverage (total positions vs capital)
 - **Concurrent Positions**: Maximum 10 positions
-- **Daily Risk Limit**: Stop new trades if losses exceed 6%
+- **Daily Risk Limit**: Stop new trades if losses exceed threshold
 - **Currency**: USD only
 
 ## 🔧 Command Line Configuration
@@ -181,17 +199,20 @@ python main.py --risk_limit 10 --max_holding_days 120
 | `--start_date` | 30 days ago | Backtest start date | YYYY-MM-DD |
 | `--end_date` | Today | Backtest end date | YYYY-MM-DD |
 | `--stop_loss` | 6 | Stop loss % | 2-10 |
-| `--position_size` | 6 | Position size % | 2-10 |
+| `--position_size` | 10 | Position size % | 2-20 |
 | `--margin_ratio` | 1.5 | Max leverage | 1.0-3.0 |
 | `--sp500_only` | False | Limit universe to S&P 500 constituents | Boolean |
-| `--mid_small_only` | False | Limit universe to mid/small-cap stocks (S&P 400/600 + market-cap range) | Boolean |
-| `--min_market_cap` | 1 | Minimum market-cap **in billions USD** passed to FMP screener | 0-∞ |
-| `--max_market_cap` | 0 | Maximum market-cap (0 = no upper limit) | 0-∞ |
-| `--screener_price_min` | 10 | Minimum share price (USD) in FMP screener | ≥0 |
-| `--screener_volume_min` | 200 000 | Minimum 20-day average volume in FMP screener | ≥0 |
+| `--mid_small_only` | False | Limit universe to mid/small-cap stocks | Boolean |
+| `--use_market_cap_filter` | False | Enable market cap filtering | Boolean |
+| `--min_market_cap` | 1 | Minimum market-cap in billions USD | 0-∞ |
+| `--max_market_cap` | 50 | Maximum market-cap in billions USD | 0-∞ |
+| `--screener_price_min` | 10 | Minimum share price (USD) | ≥0 |
+| `--screener_volume_min` | 200,000 | Minimum 20-day average volume | ≥0 |
 | `--max_gap` | 10 | Maximum allowable opening gap % | ≥0 |
-| `--pre_earnings_change` | 0 | Minimum price change % in the 20 trading-days **before** earnings | Any |
-| `--use_eodhd` | False | Force EODHD data source (for pre-2020 backtests) | Boolean |
+| `--pre_earnings_change` | 0 | Min price change % in 20 days before earnings | Any |
+| `--use_eodhd` | False | Force EODHD data source | Boolean |
+| `--use_fmp` | True | Use FMP data source (default) | Boolean |
+| `--enable_date_validation` | False | Enable earnings date validation | Boolean |
 | `--language` | 'en' | Report language | 'en' / 'ja' |
 
 ## 📊 Performance Analysis
@@ -245,6 +266,16 @@ python tests/test_fmp_comprehensive.py
 
 ## 🚀 Advanced Features
 
+### Dynamic Position Sizing
+
+```bash
+# Run with dynamic position sizing based on market conditions
+python scripts/dynamic/dynamic_main.py
+
+# Run realistic dynamic backtest with actual data
+python scripts/dynamic/run_dynamic_backtest_real.py
+```
+
 ### Data Quality Validation
 
 ```bash
@@ -258,6 +289,22 @@ python scripts/analyze_date_validation_stats.py
 python scripts/debug_fmp_api.py
 ```
 
+### Performance Analysis
+
+```bash
+# XGBoost feature importance analysis
+python scripts/analysis/xgboost_feature_analysis.py
+
+# Stop loss optimization analysis
+python scripts/analysis/comprehensive_stop_loss_analysis.py
+
+# Market breadth analysis
+python scripts/analysis/market_breadth_analysis.py
+
+# Compare backtest results
+python scripts/comparison/compare_results.py
+```
+
 ### Custom Analysis Scripts
 
 ```bash
@@ -266,6 +313,9 @@ python scripts/analyze_manh_entry.py
 
 # Generate comprehensive validation report
 python scripts/comprehensive_validation_report.py
+
+# Aggregate multiple screening files
+python scripts/aggregate_screen_files.py
 ```
 
 ## 📚 Theoretical Foundation

@@ -2,7 +2,16 @@
 
 *他の言語で読む: [English](README.md), [日本語](README_ja.md)*
 
-決算サプライズを利用したスイングトレード戦略のバックテストシステム。中小型株に特化し、当初EODHD APIで開発されていましたが、決算日の精度が低いため**FinancialModelingPrep (FMP) API**に移行しました。FMPは高精度なデータを提供しますが、Premiumプランでは過去約5年間の決算データしか取得できない制限があります。
+決算サプライズを利用したスイングトレード戦略の包括的なバックテストシステム。中小型株に特化し、**FinancialModelingPrep (FMP) API**により99.7%の決算日精度を実現。動的ポジションサイジングや高度な分析機能を搭載。
+
+## ✨ 最新アップデート (2025.08)
+
+- **🚀 動的ポジションサイジング**: 市場状況とリスク指標に基づく高度なポジション調整
+- **📊 Alpaca統合**: リアルタイムプレマーケット価格データによるエントリータイミング改善
+- **🔄 データソース移行**: FMPへの移行により99.7%の決算日精度を達成
+- **🎯 強化フィルタリング**: 技術的・ファンダメンタル分析を含む2段階フィルタリング
+- **⚡ モジュラーアーキテクチャ**: 明確な責任分離による再構成されたコードベース
+- **📈 高度な分析**: 市場ブレス分析、セクターローテーション、XGBoost特徴分析
 
 ## 🚀 クイックスタート
 
@@ -10,8 +19,9 @@
 
 - Python 3.11以上
 - **[FinancialModelingPrep API](https://site.financialmodelingprep.com/)（FMP）のAPIキー（Premiumプラン、必須）**
-  - ⚠️ **注意**: FMP Premiumプランは過去約5年間（2020年8月以降）の決算データのみ提供
-- （任意）[EODHD API](https://eodhistoricaldata.com/)のAPIキー（アドバンストプラン、2020年以前のデータ用）
+  - ⚠️ **注意**: FMP Premiumプランは2020年8月以降の決算データのみ提供
+- （任意）[EODHD API](https://eodhistoricaldata.com/)のAPIキー（2020年以前のデータ用）
+- （任意）[Alpaca API](https://alpaca.markets/)のAPIキー（リアルタイムプレマーケットデータ用）
 
 ### インストール
 
@@ -38,8 +48,12 @@ pip install -r requirements.txt
 # FMP（Premiumプラン）- 必須
 FMP_API_KEY=your_fmp_api_key
 
-# EODHD（アドバンストプラン）※任意、過去データ用
+# 任意: 2020年以前の過去データ用
 # EODHD_API_KEY=your_eodhd_api_key
+
+# 任意: リアルタイムプレマーケットデータ
+# ALPACA_API_KEY=your_alpaca_api_key
+# ALPACA_SECRET_KEY=your_alpaca_secret_key
 ```
 
 ### 基本的な実行
@@ -63,52 +77,62 @@ python main.py --help
 ```
 earnings-trade-backtest/
 ├── src/                           # コアソースコードモジュール
-│   ├── data_fetcher.py           # EODHD / FMP データ取得
-│   ├── fmp_data_fetcher.py       # FMP専用データユーティリティ
-│   ├── earnings_date_validator.py # 決算日クロスチェックユーティリティ
-│   ├── news_fetcher.py           # 決算ニュース取得
-│   ├── data_filter.py            # 決算・技術的フィルター
+│   ├── data_fetcher.py           # 統合データ取得（FMP/EODHD）
+│   ├── fmp_data_fetcher.py       # FMP専用最適化APIクライアント
+│   ├── alpaca_data_fetcher.py    # Alpacaリアルタイムデータ統合
+│   ├── earnings_date_validator.py # EODHD日付検証（レガシー）
+│   ├── news_fetcher.py           # 決算ニュース情報拡張
+│   ├── data_filter.py            # 2段階フィルタリングパイプライン
 │   ├── trade_executor.py         # 取引実行シミュレーション
 │   ├── risk_manager.py           # リスク管理システム
 │   ├── analysis_engine.py        # 高度なパフォーマンス分析
 │   ├── report_generator.py       # 強化されたHTML/CSVレポート生成
 │   ├── metrics_calculator.py     # 取引メトリクス計算
 │   ├── config.py                 # 設定管理
+│   ├── dynamic_position/         # 動的ポジションサイジングモジュール
 │   └── main.py                   # モジュール式メイン実行
-├── tests/                         # 包括的テストスイート
-├── scripts/                       # 分析／デバッグ用スクリプト
-├── reports/                       # 生成された分析レポート（実行後）
+├── scripts/                       # ユーティリティ・分析スクリプト
+│   ├── analysis/                  # パフォーマンス・戦略分析
+│   ├── comparison/                # 結果比較ツール
+│   ├── dynamic/                   # 動的ポジションサイジングスクリプト
+│   └── ...                        # データ検証ユーティリティ
+├── tests/                         # 包括的テストスイート（44+テスト）
+├── reports/                       # 生成された分析レポート
 ├── docs/                          # ドキュメント・スクリーンショット
-├── main.py                        # メインエントリーポイント（推奨）
-├── requirements.txt               # Python依存関係
-├── CLAUDE.md                     # Claude向けドキュメント
-├── README.md                     # 英語版ドキュメント
-├── README_ja.md                  # このファイル
-├── .gitignore                    # Git除外設定
-├── docs/                         # ドキュメント・スクリーンショット
-└── reports/                      # 生成される分析レポート（実行後）
-    ├── *.html                    # インタラクティブレポート
-    └── *.csv                     # 取引データ
+├── main.py                        # メインエントリーポイント
+├── README.md                      # 英語版ドキュメント
+├── README_ja.md                   # このファイル
+└── requirements.txt               # Python依存関係
 ```
 
 ## 🎯 戦略の概要
 
-### 1. エントリー条件
-- **決算サプライズ**: 5%以上の予想超過
-- **ギャップアップ**: 決算発表後の株価上昇
-- **市場キャップ**: 中小型株（$300M-$10B）
-- **出来高**: 通常の2倍以上
+### 1. エントリー条件（2段階フィルタリング）
+
+**第1段階 - 決算フィルター:**
+- **決算サプライズ**: アナリスト予想を5%以上上回る
+- **ポジティブ決算**: 実際のEPS > 0
+- **市場**: 米国株のみ（自動フィルタリング）
+
+**第2段階 - 技術的フィルター:**
+- **ギャップアップ**: オープニングギャップ≥0%（最大ギャップ設定可能）
+- **価格フィルター**: $10以上（ペニーストック除外）
+- **出来高**: 20日平均≥20万株
+- **決算前の動き**: 決算20日前の価格変動（設定可能）
 
 ### 2. エグジット条件
 - **ストップロス**: 6%の損失で自動売却
 - **トレーリングストップ**: 21日移動平均線を下回ったら売却
-- **最大保有期間**: 50日
+- **最大保有期間**: 90日強制売却
+- **部分利確**: 初日8%利益で35%ポジション売却
 
 ### 3. リスク管理
-- **ポジションサイズ**: 資本の6%
+- **ポジションサイズ**: 資本の6-10%（設定可能）
+- **動的サイジング**: 市場状況に基づくポジション調整（オプション）
 - **マージン制御**: 最大1.5倍レバレッジ（総ポジションvs資本）
 - **同時保有**: 最大10銘柄
-- **セクター分散**: 各セクター最大30%
+- **日次リスク制限**: 損失が閾値を超えたら新規取引停止
+- **通貨**: USDのみ
 
 ## 📈 レポート出力
 
@@ -131,7 +155,7 @@ earnings-trade-backtest/
 
 # 資金設定
 --initial_capital 100000    # 初期資金（デフォルト: $100,000）
---position_size 6           # ポジションサイズ％（デフォルト: 6%）
+--position_size 10          # ポジションサイズ％（デフォルト: 10%）
 ```
 
 #### リスク管理設定
@@ -265,6 +289,60 @@ python main.py \
 | `sp500_only` | False | S&P500銘柄のみ対象 | - | 大型株中心、安定志向 |
 | `mid_small_only` | True | 中小型株のみ対象 | - | S&P400/600、成長志向 |
 | `no_mid_small_only` | False | 中小型株制限解除 | - | 全市場対象 |
+
+## 🚀 高度な機能
+
+### 動的ポジションサイジング
+
+```bash
+# 市場状況に基づく動的ポジションサイジングで実行
+python scripts/dynamic/dynamic_main.py
+
+# 実データを使用したリアルな動的バックテスト
+python scripts/dynamic/run_dynamic_backtest_real.py
+```
+
+### データ品質検証
+
+```bash
+# FMPと参照データの精度比較
+python scripts/compare_fmp_finviz_accuracy.py
+
+# 決算日検証統計の分析
+python scripts/analyze_date_validation_stats.py
+
+# FMP APIレスポンスのデバッグ
+python scripts/debug_fmp_api.py
+```
+
+### パフォーマンス分析
+
+```bash
+# XGBoost特徴重要度分析
+python scripts/analysis/xgboost_feature_analysis.py
+
+# ストップロス最適化分析
+python scripts/analysis/comprehensive_stop_loss_analysis.py
+
+# 市場ブレス分析
+python scripts/analysis/market_breadth_analysis.py
+
+# バックテスト結果の比較
+python scripts/comparison/compare_results.py
+```
+
+### カスタム分析スクリプト
+
+```bash
+# 特定銘柄のパフォーマンス分析
+python scripts/analyze_manh_entry.py
+
+# 包括的検証レポートの生成
+python scripts/comprehensive_validation_report.py
+
+# 複数スクリーニングファイルの集約
+python scripts/aggregate_screen_files.py
+```
 
 ### エグジット条件の詳細
 
