@@ -141,15 +141,26 @@ class TestDailyScreenerDataIntegrity:
     """データ整合性のテスト"""
 
     def test_no_lookahead_bias_uses_previous_day_close(self):
-        """ルックアヘッドバイアスなし - 前日終値を使用"""
+        """
+        ルックアヘッドバイアスなし - 前日終値を使用
+
+        DataFilter._second_stage_filter() では:
+        - gap = (pre_open_price - prev_day_data['Close']) / prev_day_data['Close'] * 100
+        - entry_price = trade_date_data['Open']
+
+        つまり、gap計算は「前日終値 vs 当日プレオープン/オープン価格」で行われ、
+        スクリーナーを西海岸12:00 PM（マーケット引け後）に実行すれば
+        確定した価格を使用するため、ルックアヘッドバイアスは発生しない。
+        """
         from scripts.screen_daily_candidates import calculate_candidate_score
 
         # Arrange - スクリーン日の前日データを使用
+        # gap_percent は DataFilter で「(当日Open - 前日Close) / 前日Close」として計算済み
         candidate_data = {
             'earnings_date': '2024-06-14',  # 決算日
-            'screen_date': '2024-06-15',    # スクリーン日
+            'screen_date': '2024-06-15',    # スクリーン日（=トレード日）
             'prev_close': 150.0,            # 前日終値
-            'gap_percent': 5.0,
+            'gap_percent': 5.0,             # (当日Open - 前日Close) / 前日Close
             'eps_surprise_percent': 10.0,
         }
 
