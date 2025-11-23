@@ -41,7 +41,7 @@ def parse_arguments():
                         help='Maximum holding period in days')
     parser.add_argument('--initial_capital', type=float, default=100000.0,
                         help='Initial capital amount')
-    parser.add_argument('--position_size', type=float, default=6.0,
+    parser.add_argument('--position_size', type=float, default=15.0,
                         help='Position size as percentage of capital')
     parser.add_argument('--slippage', type=float, default=0.3,
                         help='Slippage percentage')
@@ -51,6 +51,8 @@ def parse_arguments():
                         help='Minimum price change percentage 20 days before earnings')
     parser.add_argument('--max_gap', type=float, default=10.0,
                         help='Maximum allowable opening gap percentage (stocks with larger gaps will be excluded)')
+    parser.add_argument('--min_surprise', type=float, default=5.0,
+                        help='Minimum EPS surprise percentage (default: 5.0%%)')
     parser.add_argument('--margin_ratio', type=float, default=1.5,
                         help='Maximum position to capital ratio (default: 1.5x leverage)')
     
@@ -78,13 +80,13 @@ def parse_arguments():
                         help='Use EODHD instead of default FMP data source (requires EODHD_API_KEY)')
     
     # 時価総額ベースフィルタリング (デフォルト: 無効)
-    parser.add_argument('--min_market_cap', type=float, default=1.0,
+    parser.add_argument('--min_market_cap', type=float, default=5.0,
                         help='Minimum market cap in billions for mid/small cap filtering (default: 1.0B)')
     parser.add_argument('--max_market_cap', type=float, default=0.0,
                         help='Maximum market cap in billions (0 または未指定で上限なし)')
 
     # FMPスクリーナー追加条件
-    parser.add_argument('--screener_price_min', type=float, default=10.0,
+    parser.add_argument('--screener_price_min', type=float, default=30.0,
                         help='Minimum stock price for FMP screener (default: 10)')
     parser.add_argument('--screener_volume_min', type=int, default=200000,
                         help='Minimum average volume for FMP screener (default: 200,000)')
@@ -98,6 +100,14 @@ def parse_arguments():
     
     parser.add_argument('--log_level', default='INFO',
                     choices=['DEBUG','INFO','WARNING','ERROR','CRITICAL'])
+    
+    # 動的ポジションサイズ設定
+    parser.add_argument('--dynamic_position', type=str, 
+                       choices=['breadth_8ma', 'advanced_5stage', 'bearish_signal', 'bottom_3stage'],
+                       help='Enable dynamic position sizing with specified pattern')
+    parser.add_argument('--breadth_csv', type=str, 
+                       default='data/market_breadth_data_20250817_ma8.csv',
+                       help='Market Breadth CSV file path for dynamic sizing')
     
     return parser.parse_args()
 

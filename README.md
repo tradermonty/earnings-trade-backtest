@@ -124,7 +124,7 @@ earnings-trade-backtest/
 ### 1. Entry Conditions (Two-Stage Filtering)
 
 **Stage 1 - Earnings Filter:**
-- **Earnings Surprise**: ≥5% above analyst expectations
+- **Earnings Surprise**: ≥5% above analyst expectations (configurable via `--min_surprise`)
 - **Positive Earnings**: Actual EPS > 0
 - **Market**: US stocks only (automatically filtered)
 
@@ -209,6 +209,7 @@ python main.py --risk_limit 10 --max_holding_days 120
 | `--screener_price_min` | 10 | Minimum share price (USD) | ≥0 |
 | `--screener_volume_min` | 200,000 | Minimum 20-day average volume | ≥0 |
 | `--max_gap` | 10 | Maximum allowable opening gap % | ≥0 |
+| `--min_surprise` | 5 | Minimum EPS surprise % | ≥0 |
 | `--pre_earnings_change` | 0 | Min price change % in 20 days before earnings | Any |
 | `--use_eodhd` | False | Force EODHD data source | Boolean |
 | `--use_fmp` | True | Use FMP data source (default) | Boolean |
