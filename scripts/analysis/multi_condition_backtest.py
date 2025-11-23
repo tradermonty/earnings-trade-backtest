@@ -55,15 +55,24 @@ def extract_metrics(
     trades: List[Dict],
     metrics: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """バックテスト結果からメトリクスを抽出する"""
+    """バックテスト結果からメトリクスを抽出する
+
+    metrics_calculator.py の出力キーに合わせてマッピング:
+    - number_of_trades: トレード数
+    - win_rate: 勝率
+    - avg_win_loss_rate: 平均損益率 (%)
+    - total_return_pct: 総リターン率 (%)
+    - sharpe_ratio: シャープレシオ
+    - max_drawdown_pct: 最大ドローダウン (%)
+    """
     return {
         "condition": condition_name,
-        "trades": metrics.get("total_trades", len(trades)),
+        "trades": metrics.get("number_of_trades", len(trades)),
         "win_rate": metrics.get("win_rate", 0.0),
-        "avg_pnl": metrics.get("avg_return", 0.0),
-        "total_return": metrics.get("total_return", 0.0),
+        "avg_pnl": metrics.get("avg_win_loss_rate", 0.0),
+        "total_return": metrics.get("total_return_pct", 0.0),
         "sharpe_ratio": metrics.get("sharpe_ratio", 0.0),
-        "max_drawdown": metrics.get("max_drawdown", 0.0),
+        "max_drawdown": metrics.get("max_drawdown_pct", 0.0),
     }
 
 
@@ -97,6 +106,20 @@ def parse_arguments():
     parser.add_argument('--verbose', action='store_true',
                         help='Enable verbose output')
 
+    # バックテスト共通パラメータ
+    parser.add_argument('--position_size', type=float, default=10.0,
+                        help='Position size as percentage of capital')
+    parser.add_argument('--margin_ratio', type=float, default=1.5,
+                        help='Maximum margin ratio')
+    parser.add_argument('--max_holding_days', type=int, default=90,
+                        help='Maximum holding period in days')
+    parser.add_argument('--screener_price_min', type=float, default=10.0,
+                        help='Minimum stock price for screener')
+    parser.add_argument('--min_market_cap', type=float, default=1.0,
+                        help='Minimum market cap in billions USD')
+    parser.add_argument('--stop_loss', type=float, default=6.0,
+                        help='Stop loss percentage')
+
     return parser.parse_args()
 
 
@@ -104,7 +127,8 @@ def run_backtest_for_condition(
     condition: Dict[str, Any],
     start_date: str,
     end_date: str,
-    verbose: bool = False
+    verbose: bool = False,
+    **extra_config
 ) -> Dict[str, Any]:
     """単一条件でバックテストを実行し、結果を返す"""
     condition_name = condition["name"]
@@ -119,12 +143,13 @@ def run_backtest_for_condition(
         config = create_config_from_condition(
             condition,
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            **extra_config
         )
 
         # バックテストを実行
         backtest = EarningsBacktest(config)
-        backtest.run()
+        backtest.execute_backtest()
 
         # メトリクスを抽出
         result = extract_metrics(
@@ -156,7 +181,8 @@ def run_all_backtests(
     conditions: List[Dict[str, Any]],
     start_date: str,
     end_date: str,
-    verbose: bool = False
+    verbose: bool = False,
+    **extra_config
 ) -> List[Dict[str, Any]]:
     """すべての条件でバックテストを実行"""
     results = []
@@ -166,7 +192,8 @@ def run_all_backtests(
             condition,
             start_date,
             end_date,
-            verbose
+            verbose,
+            **extra_config
         )
         results.append(result)
     return results
@@ -211,14 +238,30 @@ def main():
     print("=" * 60)
     print(f"Period: {args.start_date} to {args.end_date}")
     print(f"Conditions: {len(CONDITIONS)}")
+    print(f"Position Size: {args.position_size}%")
+    print(f"Stop Loss: {args.stop_loss}%")
+    print(f"Max Holding Days: {args.max_holding_days}")
+    print(f"Min Price: ${args.screener_price_min}")
+    print(f"Min Market Cap: ${args.min_market_cap}B")
     print()
+
+    # 追加パラメータを辞書にまとめる
+    extra_config = {
+        "position_size": args.position_size,
+        "margin_ratio": args.margin_ratio,
+        "max_holding_days": args.max_holding_days,
+        "screener_price_min": args.screener_price_min,
+        "min_market_cap": args.min_market_cap * 1e9,  # Convert to actual value
+        "stop_loss": args.stop_loss,
+    }
 
     # 全条件でバックテスト実行
     results = run_all_backtests(
         CONDITIONS,
         args.start_date,
         args.end_date,
-        args.verbose
+        args.verbose,
+        **extra_config
     )
 
     # 結果をDataFrameに変換

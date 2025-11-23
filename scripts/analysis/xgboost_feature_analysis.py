@@ -18,11 +18,11 @@ def load_and_merge_data():
     print("Loading data...")
     
     # Load aggregated screen data
-    screen_df = pd.read_csv('../../aggregated_screen.csv')
+    screen_df = pd.read_csv('earnings/aggregated_screen.csv')
     print(f"Screen data: {len(screen_df)} rows")
     
     # Load trading results  
-    trades_df = pd.read_csv('../../reports/earnings_backtest_2024_09_02_2025_06_30_finviz.csv')
+    trades_df = pd.read_csv('reports/earnings_backtest_2024_09_01_2025_07_30_finviz_.csv')
     print(f"Trading data: {len(trades_df)} rows")
     
     # Convert Trade Date to datetime for merging
@@ -197,8 +197,8 @@ def analyze_feature_importance(clf_model, reg_model, feature_names):
     plt.gca().invert_yaxis()
     
     plt.tight_layout()
-    plt.savefig('../../reports/feature_importance_analysis.png', dpi=300, bbox_inches='tight')
-    print("\nFeature importance chart saved as '../../reports/feature_importance_analysis.png'")
+    plt.savefig('reports/feature_importance_analysis.png', dpi=300, bbox_inches='tight')
+    print("\nFeature importance chart saved as 'reports/feature_importance_analysis.png'")
     
     return importance_df
 
@@ -244,9 +244,11 @@ def generate_insights(importance_df, merged_df):
                     feature_series = feature_series.str.replace('%', '').str.replace(',', '')
                 
                 merged_df[feature + '_numeric'] = pd.to_numeric(feature_series, errors='coerce')
-                
-                winner_mean = winners[feature + '_numeric'].mean()
-                loser_mean = losers[feature + '_numeric'].mean()
+
+                # Compute means using boolean masks on merged_df to ensure the
+                # newly created numeric column is always available
+                winner_mean = merged_df.loc[merged_df['pnl'] > 0, feature + '_numeric'].mean()
+                loser_mean = merged_df.loc[merged_df['pnl'] <= 0, feature + '_numeric'].mean()
                 
                 if not (pd.isna(winner_mean) or pd.isna(loser_mean)):
                     print(f"\n{feature}:")
