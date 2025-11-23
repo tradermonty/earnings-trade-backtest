@@ -15,7 +15,8 @@ class TradeExecutor:
                  initial_capital: float = 10000, position_size: float = 6,
                  stop_loss: float = 6, trail_stop_ma: int = 21,
                  max_holding_days: int = 90, slippage: float = 0.3,
-                 partial_profit: bool = True, margin_ratio: float = 1.5):
+                 partial_profit: bool = True, margin_ratio: float = 1.5,
+                 config=None, entry_timing: str = "open"):
         """TradeExecutorの初期化"""
         self.data_fetcher = data_fetcher
         self.risk_manager = risk_manager
@@ -27,6 +28,8 @@ class TradeExecutor:
         self.slippage = slippage
         self.partial_profit = partial_profit
         self.margin_ratio = margin_ratio
+        self.config = config
+        self.entry_timing = entry_timing if config is None else getattr(config, 'entry_timing', 'open')
         
         # トレード記録
         self.trades = []
@@ -37,6 +40,58 @@ class TradeExecutor:
         self.active_positions = []  # 現在のアクティブポジション
         self.start_date = None
         self.end_date = None
+        
+        # 動的ポジションサイズ機能の初期化（必要時のみ）
+        self.dynamic_position_manager = None
+        self.position_calculator = None
+        if config and config.enable_dynamic_position:
+            self._init_dynamic_position_system()
+    
+    def _init_dynamic_position_system(self):
+        """動的ポジションサイズシステムを初期化"""
+        try:
+            from .dynamic_position import MarketBreadthManager, PositionCalculator
+            
+            self.dynamic_position_manager = MarketBreadthManager(self.config.breadth_csv_path)
+            self.position_calculator = PositionCalculator(self.config)
+            
+            print(f"✅ Dynamic Position Size System initialized:")
+            print(f"   Pattern: {self.config.dynamic_position_pattern}")
+            
+        except Exception as e:
+            print(f"⚠️  Warning: Dynamic position sizing disabled due to error: {e}")
+            self.config.enable_dynamic_position = False
+            self.dynamic_position_manager = None
+            self.position_calculator = None
+    
+    def _calculate_dynamic_position_size(self, entry_date: str) -> float:
+        """動的ポジションサイズを計算"""
+        if not self.config or not self.config.enable_dynamic_position:
+            return self.position_size
+        
+        if not self.dynamic_position_manager or not self.position_calculator:
+            return self.position_size
+        
+        try:
+            entry_datetime = datetime.strptime(entry_date, '%Y-%m-%d')
+            market_data = self.dynamic_position_manager.get_market_data(entry_datetime)
+            
+            if market_data:
+                position_size, reason = self.position_calculator.calculate_position_size(
+                    market_data, entry_datetime
+                )
+                
+                # デバッグログ（簡易版）
+                if self.config.dynamic_position_pattern:
+                    tqdm.write(f"  Dynamic Position: {position_size:.1f}% ({reason})")
+                
+                return position_size
+            else:
+                return self.position_size
+                
+        except Exception as e:
+            tqdm.write(f"  Warning: Dynamic position calculation failed: {e}")
+            return self.position_size
     
     def classify_market_cap(self, symbol: str, price: float) -> str:
         """時価総額区分を分類"""
@@ -100,6 +155,7 @@ class TradeExecutor:
         print(f"最大保有期間: {self.max_holding_days}日")
         print(f"スリッページ: {self.slippage}%")
         print(f"マージン倍率制限: {self.margin_ratio}倍")
+        print(f"エントリータイミング: {self.entry_timing} ({'寄り付き' if self.entry_timing == 'open' else '引け'})")
         
         self.trades = []
         self.current_capital = self.initial_capital
@@ -173,9 +229,19 @@ class TradeExecutor:
             tqdm.write("- スキップ: 当日の株価データなし")
             return None
 
-        # candidate に価格・ギャップが未設定の場合はここで補完
-        if candidate.get('price') is None:
-            candidate['price'] = entry_row['Open']
+        # 引けエントリーの場合: フィルターチェック
+        if self.entry_timing == "close":
+            passes, reason, close_price = self._check_close_entry_filters(stock_data, entry_date)
+            if not passes:
+                tqdm.write(f"- スキップ (引けフィルター): {reason}")
+                return None
+            # 引けエントリーの場合、Close価格でエントリー
+            candidate['price'] = close_price
+            tqdm.write(f"- 引けエントリー: Close=${close_price:.2f}")
+        else:
+            # 寄り付きエントリーの場合
+            if candidate.get('price') is None:
+                candidate['price'] = entry_row['Open']
 
         if candidate.get('gap') is None:
             try:
@@ -184,9 +250,12 @@ class TradeExecutor:
             except Exception:
                 candidate['gap'] = 0.0
 
+        # 動的ポジションサイズの計算（有効時のみ）
+        current_position_size = self._calculate_dynamic_position_size(entry_date)
+        
         # ポジションサイズの計算
         position_info = self.risk_manager.calculate_position_size(
-            self.current_capital, self.position_size, candidate['price'], self.slippage
+            self.current_capital, current_position_size, candidate['price'], self.slippage
         )
         
         if position_info['shares'] == 0:
@@ -545,3 +614,64 @@ class TradeExecutor:
             'start_date': self.start_date,
             'end_date': self.end_date
         }
+
+    def _check_close_entry_filters(self, stock_data: pd.DataFrame, entry_date: str) -> tuple:
+        """
+        引けエントリーのフィルター条件をチェック
+
+        Returns:
+            tuple: (passes_filter: bool, reason: str, close_price: float or None)
+        """
+        try:
+            entry_row = stock_data.loc[entry_date]
+        except KeyError:
+            return False, "当日データなし", None
+
+        open_price = entry_row['Open']
+        high_price = entry_row['High']
+        low_price = entry_row['Low']
+        close_price = entry_row['Close']
+        volume = entry_row['Volume']
+
+        # 日中レンジ
+        intraday_range = high_price - low_price
+        if intraday_range <= 0:
+            return False, "日中レンジなし", None
+
+        # 1. 終値が日中レンジの上位X%以上
+        min_position = getattr(self.config, 'close_entry_min_intraday_position', 50.0)
+        close_position_in_range = ((close_price - low_price) / intraday_range) * 100
+        if close_position_in_range < min_position:
+            return False, f"終値位置{close_position_in_range:.1f}% < {min_position}%", None
+
+        # 2. 終値が始値のX%超（大きく崩れていない）
+        min_close_vs_open = getattr(self.config, 'close_entry_min_close_vs_open', 98.0)
+        close_vs_open_pct = (close_price / open_price) * 100
+        if close_vs_open_pct < min_close_vs_open:
+            return False, f"終値/始値{close_vs_open_pct:.1f}% < {min_close_vs_open}%", None
+
+        # 3. 出来高が20日平均のX倍以上
+        min_volume_ratio = getattr(self.config, 'close_entry_min_volume_ratio', 1.5)
+        if 'Volume_MA20' in stock_data.columns and pd.notna(stock_data.loc[entry_date, 'Volume_MA20']):
+            volume_ma20 = stock_data.loc[entry_date, 'Volume_MA20']
+            if volume_ma20 > 0:
+                volume_ratio = volume / volume_ma20
+                if volume_ratio < min_volume_ratio:
+                    return False, f"出来高比率{volume_ratio:.1f}x < {min_volume_ratio}x", None
+
+        # 4. VWAP上で引けること（簡易的にVWAPを計算）
+        require_above_vwap = getattr(self.config, 'close_entry_require_above_vwap', True)
+        if require_above_vwap:
+            # 簡易VWAP = (High + Low + Close) / 3 * Volume を accumulated で計算
+            # ここでは当日の典型価格で代用
+            typical_price = (high_price + low_price + close_price) / 3
+            if close_price < typical_price:
+                return False, f"終値{close_price:.2f} < VWAP近似{typical_price:.2f}", None
+
+        return True, "OK", close_price
+
+    def _calculate_volume_ma20(self, stock_data: pd.DataFrame) -> pd.DataFrame:
+        """20日出来高移動平均を計算"""
+        if 'Volume' in stock_data.columns:
+            stock_data['Volume_MA20'] = stock_data['Volume'].rolling(window=20).mean()
+        return stock_data

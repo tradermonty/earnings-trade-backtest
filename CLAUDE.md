@@ -142,6 +142,26 @@ The system generates:
 - Lower earnings date accuracy (44%) compared to FMP (90%+)
 - Recommended for long-term historical analysis despite accuracy trade-offs
 
+## Development Methodology
+
+### TDD (Test-Driven Development)
+
+このプロジェクトでは **TDD (テスト駆動開発)** を採用しています。新機能を実装する際は以下のサイクルに従ってください：
+
+1. **RED**: まず失敗するテストを書く
+2. **GREEN**: テストをパスする最小限の実装を書く
+3. **REFACTOR**: コードをリファクタリングして改善する
+
+テストは `tests/` ディレクトリに配置し、`pytest` を使用して実行します：
+
+```bash
+# 全テストを実行
+python -m pytest tests/ -v
+
+# 特定のテストファイルを実行
+python -m pytest tests/test_close_entry_filter.py -v
+```
+
 ## Notes
 
 - The system defaults to targeting mid/small cap stocks (S&P 400/600)

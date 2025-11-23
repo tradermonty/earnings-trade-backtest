@@ -102,13 +102,17 @@ def parse_arguments():
                     choices=['DEBUG','INFO','WARNING','ERROR','CRITICAL'])
     
     # 動的ポジションサイズ設定
-    parser.add_argument('--dynamic_position', type=str, 
+    parser.add_argument('--dynamic_position', type=str,
                        choices=['breadth_8ma', 'advanced_5stage', 'bearish_signal', 'bottom_3stage'],
                        help='Enable dynamic position sizing with specified pattern')
-    parser.add_argument('--breadth_csv', type=str, 
+    parser.add_argument('--breadth_csv', type=str,
                        default='data/market_breadth_data_20250817_ma8.csv',
                        help='Market Breadth CSV file path for dynamic sizing')
-    
+
+    # エントリータイミング設定
+    parser.add_argument('--entry_timing', type=str, choices=['open', 'close'], default='open',
+                       help='Entry timing: "open" for market open, "close" for market close (default: open)')
+
     return parser.parse_args()
 
 
@@ -167,7 +171,9 @@ def main():
             print("データソース: EODHD")
         else:
             print("データソース: Financial Modeling Prep (FMP)")
-        
+
+        entry_timing_str = "寄り付き" if args.entry_timing == "open" else "引け"
+        print(f"エントリータイミング: {entry_timing_str}")
         print(f"言語: 日本語")
     else:
         print(f"Period: {args.start_date} to {args.end_date}")
@@ -187,7 +193,9 @@ def main():
             print("Data Source: EODHD")
         else:
             print("Data Source: Financial Modeling Prep (FMP)")
-        
+
+        entry_timing_str = "Market Open" if args.entry_timing == "open" else "Market Close"
+        print(f"Entry Timing: {entry_timing_str}")
         print(f"Language: English")
     print("-" * 50)
     

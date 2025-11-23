@@ -247,12 +247,12 @@ class DataFilter:
                 
                 trade_date_data, prev_day_data, _ = trade_result
 
-                # --- Intraday gap using pre-open price (09:25 ET) ---
+                # --- Intraday gap using pre-open price (09:25 ET) or fallback to daily open ---
                 pre_open_price = self.data_fetcher.get_preopen_price(symbol, trade_date)
                 if pre_open_price is None:
-                    skipped_count += 1
-                    tqdm.write(f"- スキップ: プレオープン価格取得失敗 ({symbol} {trade_date})")
-                    continue
+                    # Fallback to daily open price for historical backtesting
+                    pre_open_price = trade_date_data['Open']
+                    tqdm.write(f"- 注意: プレオープン価格取得失敗、日足オープン価格を使用 ({symbol} {trade_date})")
                 gap = (pre_open_price - prev_day_data['Close']) / prev_day_data['Close'] * 100
 
                 # 平均出来高を計算

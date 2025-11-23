@@ -48,6 +48,15 @@ class BacktestConfig:
     breadth_csv_path: Optional[str] = None
     enable_dynamic_position: bool = False
 
+    # エントリータイミング設定
+    entry_timing: str = "open"  # "open" (寄り付き) or "close" (引け)
+
+    # 引けエントリー用フィルター条件
+    close_entry_min_intraday_position: float = 50.0  # 終値が日中レンジの上位X%以上
+    close_entry_min_close_vs_open: float = 98.0  # 終値が始値のX%超
+    close_entry_require_above_vwap: bool = True  # VWAP上で引けること
+    close_entry_min_volume_ratio: float = 1.5  # 出来高が20日平均のX倍以上
+
 
 class ThemeConfig:
     """ダークモードの色設定"""
