@@ -28,11 +28,76 @@ class TestBacktestConfig(unittest.TestCase):
             start_date='2024-01-01',
             end_date='2024-01-31'
         )
-        
+
         self.assertEqual(config.start_date, '2024-01-01')
         self.assertEqual(config.end_date, '2024-01-31')
         self.assertEqual(config.stop_loss, 6)
         self.assertEqual(config.initial_capital, 10000)
+
+    def test_min_surprise_percent_default_value(self):
+        """min_surprise_percent のデフォルト値テスト"""
+        config = BacktestConfig(
+            start_date='2024-01-01',
+            end_date='2024-01-31'
+        )
+
+        # デフォルト値は 5.0% であるべき
+        self.assertEqual(config.min_surprise_percent, 5.0)
+
+    def test_min_surprise_percent_custom_value(self):
+        """min_surprise_percent のカスタム値テスト"""
+        config = BacktestConfig(
+            start_date='2024-01-01',
+            end_date='2024-01-31',
+            min_surprise_percent=20.0
+        )
+
+        # カスタム値が設定されるべき
+        self.assertEqual(config.min_surprise_percent, 20.0)
+
+
+class TestCLIArguments(unittest.TestCase):
+    """CLI引数のテスト"""
+
+    def test_min_surprise_argument_default(self):
+        """--min_surprise のデフォルト値テスト"""
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__))))
+        from main import parse_arguments
+
+        # 引数なしでパース (sys.argvをモック)
+        with patch.object(sys, 'argv', ['main.py', '--start_date', '2024-01-01', '--end_date', '2024-01-31']):
+            args = parse_arguments()
+            # デフォルト値は 5.0 であるべき
+            self.assertEqual(args.min_surprise, 5.0)
+
+    def test_min_surprise_argument_custom(self):
+        """--min_surprise のカスタム値テスト"""
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__))))
+        from main import parse_arguments
+
+        # --min_surprise 20.0 を指定
+        with patch.object(sys, 'argv', ['main.py', '--start_date', '2024-01-01', '--end_date', '2024-01-31', '--min_surprise', '20.0']):
+            args = parse_arguments()
+            self.assertEqual(args.min_surprise, 20.0)
+
+
+class TestConfigToDataFilterIntegration(unittest.TestCase):
+    """BacktestConfig から DataFilter への値受け渡しテスト"""
+
+    def test_earnings_backtest_passes_min_surprise_to_data_filter(self):
+        """EarningsBacktest が min_surprise_percent を DataFilter に渡すことを確認"""
+        # src/main.pyのソースコードを読んで、DataFilter呼び出しにmin_surprise_percentが含まれているか確認
+        import inspect
+        from src.main import EarningsBacktest
+
+        # _initialize_components メソッドでDataFilterを初期化しているので、そちらを確認
+        source = inspect.getsource(EarningsBacktest._initialize_components)
+
+        # DataFilter呼び出しにmin_surprise_percentが含まれているか確認
+        self.assertIn('min_surprise_percent', source,
+                      "EarningsBacktest._initialize_components should pass min_surprise_percent to DataFilter")
 
 
 class TestDataFetcher(unittest.TestCase):

@@ -63,6 +63,9 @@ python main.py --use_fmp --start_date 2024-01-01
 
 # Combine FMP with earnings date validation for maximum accuracy
 python main.py --use_fmp --enable_date_validation --start_date 2024-01-01
+
+# High EPS surprise + low gap strategy (testing hypothesis)
+python main.py --min_surprise 20 --max_gap 3 --start_date 2024-01-01
 ```
 
 ## Key Architecture Components
@@ -91,8 +94,8 @@ The system is organized into specialized modules:
 ### Key Features
 
 1. **Filtering Pipeline**:
-   - Stage 1: Filters for US stocks with earnings surprise >= 5% and positive actual earnings
-   - Stage 2: Filters for gap >= 0%, price >= $10, 20-day avg volume >= 200k shares
+   - Stage 1: Filters for US stocks with earnings surprise >= threshold (default 5%, configurable via `--min_surprise`) and positive actual earnings
+   - Stage 2: Filters for gap >= 0%, gap <= max_gap (default 10%), price >= $10, 20-day avg volume >= 200k shares
 
 2. **Trade Execution**:
    - Entry: On earnings surprise with gap up
@@ -117,6 +120,8 @@ The system is organized into specialized modules:
 - `margin_ratio`: Maximum position to capital ratio (default: 1.5x)
 - `risk_limit`: Max loss % before stopping new trades (default: 6%)
 - `pre_earnings_change`: Min price change in 20 days before earnings (default: 0%)
+- `min_surprise`: Minimum EPS surprise percentage (default: 5%)
+- `max_gap`: Maximum allowable opening gap percentage (default: 10%)
 
 ## Output Files
 

@@ -27,6 +27,9 @@ class BacktestConfig:
     # ギャップ上限設定
     max_gap_percent: float = 10.0  # デフォルト: 10%
 
+    # 最小EPSサプライズ率設定
+    min_surprise_percent: float = 5.0  # デフォルト: 5%
+
     # FMPスクリーナー追加ファンダメンタル条件
     max_ps_ratio: float | None = None  # 最大P/S
     max_pe_ratio: float | None = None  # 最大P/E
@@ -39,6 +42,11 @@ class BacktestConfig:
     # 時価総額ベースフィルタリング設定
     min_market_cap: float = 1e9  # 最小時価総額 ($1B)
     max_market_cap: float = 50e9  # 最大時価総額 ($50B)
+    
+    # 動的ポジションサイズ設定（オプション）
+    dynamic_position_pattern: Optional[str] = None
+    breadth_csv_path: Optional[str] = None
+    enable_dynamic_position: bool = False
 
 
 class ThemeConfig:

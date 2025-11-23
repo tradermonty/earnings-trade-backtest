@@ -57,6 +57,7 @@ class EarningsBacktest:
         self.data_filter = DataFilter(
             data_fetcher=self.data_fetcher,
             target_symbols=self.target_symbols,
+            min_surprise_percent=self.config.min_surprise_percent,
             pre_earnings_change=self.config.pre_earnings_change,
             max_holding_days=self.config.max_holding_days,
             max_gap_percent=self.config.max_gap_percent,
@@ -81,7 +82,8 @@ class EarningsBacktest:
             max_holding_days=self.config.max_holding_days,
             slippage=self.config.slippage,
             partial_profit=self.config.partial_profit,
-            margin_ratio=self.config.margin_ratio
+            margin_ratio=self.config.margin_ratio,
+            config=self.config  # 動的ポジション設定のためにconfigを渡す
         )
         
         # メトリクス計算コンポーネント
@@ -287,7 +289,13 @@ def create_backtest_from_args(args) -> EarningsBacktest:
         max_ps_ratio=args.max_ps_ratio,
         max_pe_ratio=args.max_pe_ratio,
         min_profit_margin=args.min_profit_margin,
-        max_gap_percent=args.max_gap
+        max_gap_percent=args.max_gap,
+        min_surprise_percent=args.min_surprise,
+
+        # 動的ポジションサイズ設定
+        dynamic_position_pattern=getattr(args, 'dynamic_position', None),
+        breadth_csv_path=getattr(args, 'breadth_csv', None),
+        enable_dynamic_position=getattr(args, 'dynamic_position', None) is not None
     )
     
     return EarningsBacktest(config)
