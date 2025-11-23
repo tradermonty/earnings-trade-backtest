@@ -295,7 +295,10 @@ def create_backtest_from_args(args) -> EarningsBacktest:
         # 動的ポジションサイズ設定
         dynamic_position_pattern=getattr(args, 'dynamic_position', None),
         breadth_csv_path=getattr(args, 'breadth_csv', None),
-        enable_dynamic_position=getattr(args, 'dynamic_position', None) is not None
+        enable_dynamic_position=getattr(args, 'dynamic_position', None) is not None,
+
+        # エントリータイミング設定
+        entry_timing=getattr(args, 'entry_timing', 'open'),
     )
-    
+
     return EarningsBacktest(config)
