@@ -12,7 +12,7 @@ class BacktestConfig:
     max_holding_days: int = 90
     initial_capital: float = 100000
     position_size: float = 10
-    slippage: float = 0.3
+    slippage: float = 1.0  # 現実的なスリッページ (0.3%は楽観的すぎる)
     risk_limit: float = 6
     partial_profit: bool = True
     sp500_only: bool = False
