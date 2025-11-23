@@ -1,5 +1,5 @@
 """scripts/aggregate_screen_files.py
-スクリーン結果 (screen_*.csv.gz) を読み込み、
+スクリーン結果 (screen_*.csv および screen_*.csv.gz) を読み込み、
 日付ごとに先頭から最大 N 件 (Ticker) を抽出して 1 つの CSV にまとめる。
 追加列:
 - Trade Date : 決算発表時間が 9:30 以降なら +1 日、それ以外は発表日
@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import List
 
 import pandas as pd
+from itertools import chain
 
 # -----------------------------------------------------------------------------
 # ユーティリティ
@@ -34,9 +35,16 @@ def calc_trade_date(earnings_datetime: datetime) -> datetime.date:
     return earnings_datetime.date()
 
 
+def _open_text(screen_path: Path):
+    """与えられたパスをテキストとして開く。`.gz` は gzip、その他は通常の open を使う。"""
+    if screen_path.suffix == ".gz" or screen_path.name.endswith(".csv.gz"):
+        return gzip.open(screen_path, "rt", encoding="utf-8")
+    return open(screen_path, "r", encoding="utf-8")
+
+
 def extract_rows(screen_path: Path, top_n: int) -> pd.DataFrame:
-    """gzip 圧縮された screen_*.csv から Score が高い順に top_n 行を抽出し、Trade Date を算出。"""
-    with gzip.open(screen_path, "rt", encoding="utf-8") as f:
+    """screen_*.csv(.gz) から Score が高い順に top_n 行を抽出し、Trade Date を算出。"""
+    with _open_text(screen_path) as f:
         df = pd.read_csv(f)
 
     # Score カラムがある場合は降順で並べ替えて上位 N 件を取得
@@ -88,7 +96,15 @@ def main():
         sys.exit(1)
 
     aggregated_rows: List[pd.DataFrame] = []
-    for csv_gz in sorted(args.screen_dir.glob("screen_*.csv")):
+    # `.csv` と `.csv.gz` の両方を対象にする
+    candidates = sorted(
+        chain(
+            args.screen_dir.glob("screen_*.csv"),
+            args.screen_dir.glob("screen_*.csv.gz"),
+        )
+    )
+
+    for csv_gz in candidates:
         try:
             rows = extract_rows(csv_gz, args.top_n)
             aggregated_rows.append(rows)

@@ -81,7 +81,12 @@ def filter_dataframe(df: pd.DataFrame, *, min_eps: float = 5.0, min_price: float
                       min_roa: float | None = None,
                       max_volatility_week: float | None = None,
                       min_perf_week: float | None = None,
+                      # 追加: 上限フィルタ（除外条件）
+                      max_perf_week: float | None = None,
+                      max_perf_month: float | None = None,
+                      max_rsi14: float | None = None,
                       max_pb_ratio: float | None = None,
+                      max_trades_per_day: int | None = 5,
                       debug: bool = False) -> pd.DataFrame:
     """aggregated_screen.csv の DataFrame に対して DataFilter 相当の条件で絞り込みを行う"""
     # 必要な列の標準化
@@ -190,6 +195,12 @@ def filter_dataframe(df: pd.DataFrame, *, min_eps: float = 5.0, min_price: float
     else:
         df["_perf_week"] = None
     
+    # Relative Strength Index (14)
+    if "Relative Strength Index (14)" in df.columns:
+        df["_rsi14"] = df["Relative Strength Index (14)"].apply(_to_float)
+    else:
+        df["_rsi14"] = None
+    
     # P/B Ratio
     if "P/B" in df.columns:
         df["_pb"] = df["P/B"].apply(_to_float)
@@ -212,6 +223,10 @@ def filter_dataframe(df: pd.DataFrame, *, min_eps: float = 5.0, min_price: float
     cond_roa = (min_roa is None) | (df["_roa"].isna()) | (df["_roa"] >= min_roa)
     cond_vol_w = (max_volatility_week is None) | (df["_vol_week"].isna()) | (df["_vol_week"] <= max_volatility_week)
     cond_perf_w = (min_perf_week is None) | (df["_perf_week"].isna()) | (df["_perf_week"] >= min_perf_week)
+    # 追加: 上限条件
+    cond_perf_w_max = (max_perf_week is None) | (df["_perf_week"].isna()) | (df["_perf_week"] <= max_perf_week)
+    cond_perf_m_max = (max_perf_month is None) | (df["_perf_m"].isna()) | (df["_perf_m"] <= max_perf_month)
+    cond_rsi14 = (max_rsi14 is None) | (df["_rsi14"].isna()) | (df["_rsi14"] <= max_rsi14)
     cond_pb = (max_pb_ratio is None) | (df["_pb"].isna()) | (df["_pb"] <= max_pb_ratio)
 
     if debug:
@@ -238,25 +253,32 @@ def filter_dataframe(df: pd.DataFrame, *, min_eps: float = 5.0, min_price: float
             print(f"  Vol(Week) <= {max_volatility_week}% : {cond_vol_w.sum()}/{total}")
         if min_perf_week is not None:
             print(f"  Perf(Week) >= {min_perf_week}% : {cond_perf_w.sum()}/{total}")
+        if max_perf_week is not None:
+            print(f"  Perf(Week) <= {max_perf_week}% : {cond_perf_w_max.sum()}/{total}")
+        if max_perf_month is not None:
+            print(f"  Perf(Month) <= {max_perf_month}% : {cond_perf_m_max.sum()}/{total}")
+        if max_rsi14 is not None:
+            print(f"  RSI(14) <= {max_rsi14} : {cond_rsi14.sum()}/{total}")
         if max_pb_ratio is not None:
             print(f"  P/B <= {max_pb_ratio}         : {cond_pb.sum()}/{total}")
 
     cond = cond_eps & cond_price & cond_vol & cond_gap & cond_pre & cond_perf1h & cond_mcap & \
-           cond_ps & cond_pe & cond_profit & cond_roa & cond_vol_w & cond_perf_w & cond_pb
+           cond_ps & cond_pe & cond_profit & cond_roa & cond_vol_w & cond_perf_w & cond_pb & \
+           cond_perf_w_max & cond_perf_m_max & cond_rsi14
 
     filtered = df[cond].reset_index(drop=True)
 
-    # 日付ごとに EPS サプライズ上位5銘柄を選択
-    if "Trade Date" in filtered.columns:
+    # 日付ごとに EPS サプライズ上位N銘柄を選択 (Nは max_trades_per_day)
+    if "Trade Date" in filtered.columns and (max_trades_per_day is not None and max_trades_per_day > 0):
         before_n = len(filtered)
         filtered = (
             filtered.sort_values("_eps", ascending=False)
                     .groupby("Trade Date", as_index=False, group_keys=False)
-                    .head(5)
+                    .head(max_trades_per_day)
                     .reset_index(drop=True)
         )
         if debug:
-            print(f"[DEBUG] 日付ごと上位5抽出: {len(filtered)}/{before_n}")
+            print(f"[DEBUG] 日付ごと上位{max_trades_per_day}抽出: {len(filtered)}/{before_n}")
 
     return filtered
 
@@ -307,7 +329,7 @@ def parse_args():
     p.add_argument("--output", type=Path, default=Path("aggregated_backtest_results.json"), help="結果 JSON の出力先")
 
     # フィルタパラメータ (DataFilter 相当)
-    p.add_argument("--min_eps", type=float, default=5, help="最低 EPS サプライズ率 (%)")
+    p.add_argument("--min_eps", type=float, default=0, help="最低 EPS サプライズ率 (%)")
     p.add_argument("--min_price", type=float, default=30.0, help="最低株価 ($)")
     p.add_argument("--max_gap", type=float, default=10.0, help="最大ギャップ率 (%)")
     p.add_argument("--min_volume", type=int, default=200, help="最低平均出来高 (千株単位)")
@@ -318,6 +340,8 @@ def parse_args():
     p.add_argument("--min_perf1h", type=float, default=-10.0, help="Performance (1 Hour) の下限 (%)")
     p.add_argument("--sp500_only", action="store_true", help="S&P500 採用銘柄のみ対象")
     p.add_argument("--debug", action="store_true", help="フィルタリング過程のデバッグ情報を表示")
+    p.add_argument("--max_trades_per_day", type=int, default=5,
+                   help="一日あたりの最大トレード銘柄数 (Noneや0で制限なし)")
     
     # XGBoost分析で重要と判明した追加パラメータ
     p.add_argument("--max_ps_ratio", type=float, default=None, help="最大 P/S 比率")
@@ -326,6 +350,10 @@ def parse_args():
     p.add_argument("--min_roa", type=float, default=None, help="最低 ROA (%)")
     p.add_argument("--max_volatility_week", type=float, default=None, help="最大週次ボラティリティ (%)")
     p.add_argument("--min_perf_week", type=float, default=None, help="最低週次パフォーマンス (%)")
+    # 追加: 除外用の上限しきい値
+    p.add_argument("--max_perf_week", type=float, default=None, help="最大週次パフォーマンス (%)")
+    p.add_argument("--max_perf_month", type=float, default=None, help="最大月次パフォーマンス (%)")
+    p.add_argument("--max_rsi14", type=float, default=None, help="最大 RSI(14)")
     p.add_argument("--max_pb_ratio", type=float, default=None, help="最大 P/B 比率")
     
     # パフォーマンス改善パラメータ
@@ -369,7 +397,11 @@ def main():
         min_roa=args.min_roa,
         max_volatility_week=args.max_volatility_week,
         min_perf_week=args.min_perf_week,
+        max_perf_week=args.max_perf_week,
+        max_perf_month=args.max_perf_month,
+        max_rsi14=args.max_rsi14,
         max_pb_ratio=args.max_pb_ratio,
+        max_trades_per_day=args.max_trades_per_day,
         debug=args.debug,
     )
     # S&P500 フィルタ (オプション)

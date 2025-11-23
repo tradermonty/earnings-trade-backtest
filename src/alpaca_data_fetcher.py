@@ -61,7 +61,7 @@ class AlpacaClient:
         symbol: str,
         start_iso: str,
         end_iso: str,
-        timeframe: TimeFrame = TimeFrame(TimeFrameUnit.Minute, 1),
+        timeframe: TimeFrame = TimeFrame(1, TimeFrameUnit.Minute),
     ) -> pd.DataFrame:
         """Fetch 1-minute bars (UTC ISO strings expected)."""
         bars = self.api.get_bars(
