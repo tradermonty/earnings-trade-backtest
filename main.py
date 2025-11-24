@@ -33,7 +33,7 @@ def parse_arguments():
                         help='End date (YYYY-MM-DD format)')
     
     # トレードパラメータ
-    parser.add_argument('--stop_loss', type=float, default=6.0,
+    parser.add_argument('--stop_loss', type=float, default=10.0,
                         help='Stop loss percentage')
     parser.add_argument('--trail_stop_ma', type=int, default=21,
                         help='Trailing stop moving average period')
