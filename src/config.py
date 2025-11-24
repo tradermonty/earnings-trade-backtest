@@ -7,7 +7,7 @@ class BacktestConfig:
     """バックテスト設定クラス"""
     start_date: str
     end_date: str
-    stop_loss: float = 6
+    stop_loss: float = 10  # ドリフト戦略と同じ
     trail_stop_ma: int = 21
     max_holding_days: int = 90
     initial_capital: float = 100000
@@ -35,13 +35,13 @@ class BacktestConfig:
     max_pe_ratio: float | None = None  # 最大P/E
     min_profit_margin: float | None = None  # 最低Profit Margin (%)
 
-    # FMPスクリーナーパラメータ
-    screener_price_min: float = 10.0
+    # FMPスクリーナーパラメータ (ドリフト戦略と同じ)
+    screener_price_min: float = 30.0  # $30以上
     screener_volume_min: int = 200_000
 
-    # 時価総額ベースフィルタリング設定
-    min_market_cap: float = 1e9  # 最小時価総額 ($1B)
-    max_market_cap: float = 50e9  # 最大時価総額 ($50B)
+    # 時価総額ベースフィルタリング設定 (ドリフト戦略と同じ)
+    min_market_cap: float = 5e9  # 最小時価総額 ($5B)
+    max_market_cap: float = 0  # 上限なし
     
     # 動的ポジションサイズ設定（オプション）
     dynamic_position_pattern: Optional[str] = None
