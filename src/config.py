@@ -48,6 +48,9 @@ class BacktestConfig:
     breadth_csv_path: Optional[str] = None
     enable_dynamic_position: bool = False
 
+    # 日本ADR除外設定
+    exclude_japanese_adr: bool = True
+
     # エントリータイミング設定
     entry_timing: str = "open"  # "open" (寄り付き) or "close" (引け)
 
