@@ -113,6 +113,10 @@ def parse_arguments():
     parser.add_argument('--entry_timing', type=str, choices=['open', 'close'], default='open',
                        help='Entry timing: "open" for market open, "close" for market close (default: open)')
 
+    # 日本ADR除外設定
+    parser.add_argument('--include_japanese_adr', action='store_true',
+                       help='Include Japanese ADR stocks (excluded by default)')
+
     return parser.parse_args()
 
 

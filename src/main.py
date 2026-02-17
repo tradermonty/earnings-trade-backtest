@@ -65,7 +65,8 @@ class EarningsBacktest:
             max_pe_ratio=self.config.max_pe_ratio,
             min_profit_margin=self.config.min_profit_margin,
             enable_date_validation=self.config.enable_earnings_date_validation,
-            api_key=self.api_key
+            api_key=self.api_key,
+            exclude_japanese_adr=self.config.exclude_japanese_adr
         )
         
         # リスク管理コンポーネント
@@ -299,6 +300,9 @@ def create_backtest_from_args(args) -> EarningsBacktest:
 
         # エントリータイミング設定
         entry_timing=getattr(args, 'entry_timing', 'open'),
+
+        # 日本ADR除外設定
+        exclude_japanese_adr=not getattr(args, 'include_japanese_adr', False),
     )
 
     return EarningsBacktest(config)

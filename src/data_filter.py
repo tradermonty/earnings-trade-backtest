@@ -9,6 +9,57 @@ from .earnings_date_validator import EarningsDateValidator
 from .news_fetcher import NewsFetcher
 
 
+# Japanese ADR symbols traded on US exchanges (NYSE/NASDAQ/OTC)
+JAPANESE_ADR_SYMBOLS = {
+    # Automotive
+    'TM',       # Toyota Motor (NYSE)
+    'HMC',      # Honda Motor (NYSE)
+    'NSANY',    # Nissan Motor (OTC)
+    'FUJHY',    # Subaru (OTC)
+    'MZDAY',    # Mazda Motor (OTC)
+    # Financial
+    'MUFG',     # Mitsubishi UFJ Financial (NYSE)
+    'SMFG',     # Sumitomo Mitsui Financial (NYSE)
+    'NMR',      # Nomura Holdings (NYSE)
+    'MFG',      # Mizuho Financial (NYSE)
+    'IX',       # ORIX Corporation (NYSE)
+    'DSCSY',    # Daiwa Securities (OTC)
+    'TKOMY',    # Tokio Marine (OTC)
+    'DSNKY',    # Dai-ichi Life (OTC)
+    # Technology / Electronics
+    'SONY',     # Sony Group (NYSE)
+    'SNE',      # Sony (old ticker)
+    'CAJ',      # Canon (NYSE)
+    'KYOCY',    # Kyocera (OTC)
+    'FUJIY',    # Fujifilm (OTC)
+    'FANUY',    # Fanuc (OTC)
+    'MRAAY',    # Murata Manufacturing (OTC)
+    'MIELY',    # Mitsubishi Electric (OTC)
+    'PCRFY',    # Panasonic (OTC)
+    'KNBWY',    # Konica Minolta (OTC)
+    # Pharma / Healthcare
+    'TAK',      # Takeda Pharmaceutical (NYSE)
+    'ASGLY',    # Astellas Pharma (OTC)
+    'DSKYF',    # Daiichi Sankyo (OTC)
+    'ESALY',    # Eisai (OTC)
+    # Telecom
+    'NTTYY',    # NTT (OTC)
+    'NTT',      # NTT (alternative ticker)
+    # Gaming / Entertainment
+    'NTDOY',    # Nintendo (OTC)
+    'NTDOF',    # Nintendo (OTC alternative)
+    # Conglomerates / Trading
+    'SFTBY',    # SoftBank Group (OTC)
+    'MSBHF',    # Mitsubishi Corp (OTC)
+    'ITOCY',    # ITOCHU (OTC)
+    # Industrial / Heavy
+    'KMTUY',    # Komatsu (OTC)
+    'KUBTY',    # Kubota (OTC)
+    'HTHIY',    # Hitachi (OTC)
+    'DNZOY',    # Denso (OTC)
+}
+
+
 class DataFilter:
     """データフィルタリングクラス"""
     
@@ -18,7 +69,8 @@ class DataFilter:
                  max_gap_percent: float = 10.0,
                  max_ps_ratio: float | None = None, max_pe_ratio: float | None = None,
                  min_profit_margin: float | None = None,
-                 enable_date_validation: bool = False, api_key: str = None):
+                 enable_date_validation: bool = False, api_key: str = None,
+                 exclude_japanese_adr: bool = True):
         """DataFilterの初期化"""
         self.data_fetcher = data_fetcher
         self.target_symbols = target_symbols
@@ -28,6 +80,7 @@ class DataFilter:
         self.max_holding_days = max_holding_days
         self.enable_date_validation = enable_date_validation
         self.max_gap_percent = max_gap_percent
+        self.exclude_japanese_adr = exclude_japanese_adr
 
         # Fundamental ratio thresholds
         self.max_ps_ratio = max_ps_ratio
@@ -80,6 +133,8 @@ class DataFilter:
         print("\n=== 第1段階フィルタリング ===")
         print("条件:")
         print("1. .US銘柄のみ")
+        if self.exclude_japanese_adr:
+            print("1b. 日本ADR銘柄を除外")
         print(f"2. サプライズ率{self.min_surprise_percent}%以上 (実績値ありの場合のみ)")
         if self.require_positive_eps:
             print("3. 実績値がプラス (実績値ありの場合のみ)")
@@ -102,6 +157,12 @@ class DataFilter:
                 
                 # シンボルを取得 (.USを除去)
                 symbol = earning['code'][:-3]
+
+                # 日本ADR銘柄の除外
+                if self.exclude_japanese_adr and symbol in JAPANESE_ADR_SYMBOLS:
+                    skipped_count += 1
+                    tqdm.write(f"DEBUG: スキップ - 日本ADR銘柄: {symbol}")
+                    continue
 
                 # ターゲットシンボルのフィルタリング
                 if self.target_symbols is not None and symbol not in self.target_symbols:
