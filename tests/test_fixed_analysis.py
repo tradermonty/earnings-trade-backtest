@@ -23,7 +23,9 @@ def test_analysis_engine():
     """Test the fixed analysis engine"""
     
     # Load the most recent trades CSV
-    csv_path = "/Users/takueisaotome/PycharmProjects/earnings-trade-backtest/reports/earnings_backtest_2025_01_01_2025_06_30.csv"
+    from pathlib import Path
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    csv_path = str(PROJECT_ROOT / "reports" / "earnings_backtest_2025_01_01_2025_06_30.csv")
     
     print(f"Loading trades from: {csv_path}")
     trades_df = pd.read_csv(csv_path)

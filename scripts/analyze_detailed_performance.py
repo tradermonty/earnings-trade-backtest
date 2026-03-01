@@ -577,7 +577,9 @@ class DetailedPerformanceAnalyzer:
 
 if __name__ == "__main__":
     # 分析の実行
-    csv_path = "/Users/takueisaotome/PycharmProjects/earnings-trade-backtest/reports/earnings_backtest_2020_08_01_2024_12_31_all.csv"
-    
+    from pathlib import Path
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    csv_path = str(PROJECT_ROOT / "reports" / "earnings_backtest_2020_08_01_2024_12_31_all.csv")
+
     analyzer = DetailedPerformanceAnalyzer(csv_path)
     results = analyzer.run_complete_analysis()
