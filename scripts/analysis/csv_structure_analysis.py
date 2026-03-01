@@ -1,8 +1,10 @@
 import pandas as pd
 import numpy as np
+from pathlib import Path
 
 # 実際のCSVファイルを分析
-csv_path = "/Users/tradermonty/PycharmProjects/earnings-trade-backtest/data/market_breadth_data_20250817_ma8.csv"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+csv_path = str(PROJECT_ROOT / "data" / "market_breadth_data_20250817_ma8.csv")
 df = pd.read_csv(csv_path)
 
 print("="*80)

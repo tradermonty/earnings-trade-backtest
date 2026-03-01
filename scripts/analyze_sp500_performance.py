@@ -457,7 +457,9 @@ class SP500PerformanceAnalyzer:
 
 if __name__ == "__main__":
     # S&P 500分析の実行
-    csv_path = "/Users/tradermonty/PycharmProjects/earnings-trade-backtest/reports/earnings_backtest_2020_08_01_2024_12_31_sp500.csv"
-    
+    from pathlib import Path
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    csv_path = str(PROJECT_ROOT / "reports" / "earnings_backtest_2020_08_01_2024_12_31_sp500.csv")
+
     analyzer = SP500PerformanceAnalyzer(csv_path)
     results = analyzer.run_complete_analysis()
