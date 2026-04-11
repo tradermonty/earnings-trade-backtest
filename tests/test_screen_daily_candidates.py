@@ -353,5 +353,68 @@ class TestDailyScreenerUniverseIntegration:
         assert result[0]['symbol'] == 'AAPL'
 
 
+class TestCriticalBugRegressions:
+    """Regression tests for C-1 (Friday AMC trade_date) and C-2 (pre_change scoring)"""
+
+    def test_friday_amc_produces_monday_trade_date(self):
+        """C-1: Friday AMC must map to Monday, not Saturday (regression for determine_trade_date)"""
+        from src.data_filter import DataFilter
+
+        df = DataFilter(
+            data_fetcher=Mock(),
+            target_symbols=None,
+            min_surprise_percent=5.0,
+        )
+        # Friday 2026-03-06 AMC -> Monday 2026-03-09
+        result = df.determine_trade_date('2026-03-06', 'AfterMarket')
+        assert result == '2026-03-09', f"Friday AMC should map to Monday, got {result}"
+
+        # Thursday AMC -> Friday (unchanged)
+        result2 = df.determine_trade_date('2026-03-05', 'AfterMarket')
+        assert result2 == '2026-03-06'
+
+        # Friday BMO -> Friday (unchanged)
+        result3 = df.determine_trade_date('2026-03-06', 'BeforeMarket')
+        assert result3 == '2026-03-06'
+
+    @patch('scripts.screen_daily_candidates.DataFilter')
+    @patch('scripts.screen_daily_candidates.build_target_universe')
+    @patch('scripts.screen_daily_candidates.DataFetcher')
+    def test_pre_change_affects_candidate_score(
+        self, MockDataFetcher, mock_build_universe, MockDataFilter
+    ):
+        """C-2: pre_change from DataFilter must flow into scoring (regression for pre_earnings_change)"""
+        mock_build_universe.return_value = {'AAPL', 'MSFT'}
+        mock_fetcher = MockDataFetcher.return_value
+        mock_fetcher.get_earnings_data.return_value = {'earnings': []}
+
+        mock_filter = MockDataFilter.return_value
+        mock_filter.filter_earnings_data.return_value = [
+            {'code': 'AAPL', 'trade_date': '2026-03-03', 'percent': 20,
+             'gap': 5, 'prev_close': 150, 'entry_price': 155,
+             'pre_change': 15.0},  # high momentum
+            {'code': 'MSFT', 'trade_date': '2026-03-03', 'percent': 20,
+             'gap': 5, 'prev_close': 300, 'entry_price': 310,
+             'pre_change': 0},  # no momentum
+        ]
+
+        args = Mock()
+        args.min_price = 30.0
+        args.min_market_cap = 5.0
+        args.min_volume = 200000
+        args.min_surprise = 5.0
+        args.max_gap = 10.0
+
+        from scripts.screen_daily_candidates import screen_candidates
+        result = screen_candidates('2026-03-03', args)
+
+        assert len(result) == 2
+        # AAPL (pre_change=15) should score higher than MSFT (pre_change=0)
+        assert result[0]['symbol'] == 'AAPL'
+        assert result[1]['symbol'] == 'MSFT'
+        assert result[0]['score'] > result[1]['score'], \
+            f"AAPL score ({result[0]['score']}) should be > MSFT ({result[1]['score']}) due to pre_change"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
