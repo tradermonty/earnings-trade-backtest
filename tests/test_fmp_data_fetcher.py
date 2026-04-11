@@ -56,54 +56,51 @@ class TestRateLimiting(unittest.TestCase):
         self.fetcher = FMPDataFetcher(api_key="test_key")
 
     def test_rate_limit_check_initial_state(self):
-        """初期状態でのレート制限チェック"""
-        # 初回リクエストは即座に処理されるべき
+        """初期状態（max_performance_mode）ではsleepもtimestamp記録もしない"""
+        self.assertTrue(self.fetcher.max_performance_mode)
         start_time = time.time()
         self.fetcher._rate_limit_check()
         elapsed = time.time() - start_time
-        
-        # 最小リクエスト間隔以下の時間で完了するはず
-        self.assertLess(elapsed, 0.2)
-        self.assertEqual(len(self.fetcher.call_timestamps), 1)
 
-    def test_minimum_request_interval(self):
-        """最小リクエスト間隔のテスト"""
-        # 2回連続でレート制限チェックを実行
-        start_time = time.time()
-        self.fetcher._rate_limit_check()
-        self.fetcher._rate_limit_check()
-        elapsed = time.time() - start_time
-        
-        # 最小リクエスト間隔（0.1秒）以上かかるはず
-        self.assertGreaterEqual(elapsed, 0.1)
-
-    def test_per_second_limit_tracking(self):
-        """1秒間のリクエスト数制限テスト"""
-        # 複数のコールを素早く実行
-        for _ in range(5):
-            self.fetcher._rate_limit_check()
-        
-        # コールタイムスタンプが記録されているかチェック
-        self.assertEqual(len(self.fetcher.call_timestamps), 5)
-        
-        # 最新のコールがlast_request_timeに設定されているかチェック
+        self.assertLess(elapsed, 0.1)
+        # max_performance_mode では call_timestamps に記録しない
+        self.assertEqual(len(self.fetcher.call_timestamps), 0)
+        # last_request_time は更新される
         self.assertIsInstance(self.fetcher.last_request_time, datetime)
 
+    def test_minimum_request_interval_in_max_performance(self):
+        """max_performance_modeでは最小間隔制限なし"""
+        start_time = time.time()
+        self.fetcher._rate_limit_check()
+        self.fetcher._rate_limit_check()
+        elapsed = time.time() - start_time
+
+        # max_performance_mode: sleep なし
+        self.assertLess(elapsed, 0.1)
+
+    def test_timestamps_recorded_when_rate_limiting_active(self):
+        """rate_limiting_active 時のみ call_timestamps に記録"""
+        self.fetcher._activate_rate_limiting(duration_minutes=1)
+        self.assertTrue(self.fetcher.rate_limiting_active)
+
+        for _ in range(5):
+            self.fetcher._rate_limit_check()
+
+        self.assertEqual(len(self.fetcher.call_timestamps), 5)
+
     def test_call_timestamp_cleanup(self):
-        """古いコールタイムスタンプのクリーンアップテスト"""
-        # 古いタイムスタンプを手動で追加
+        """rate_limiting_active 時に古い timestamp がクリーンアップされる"""
+        self.fetcher._activate_rate_limiting(duration_minutes=1)
+
         old_timestamp = datetime.now() - timedelta(minutes=2)
         self.fetcher.call_timestamps.append(old_timestamp)
-        
-        # 新しいリクエストを実行
+
         self.fetcher._rate_limit_check()
-        
-        # 古いタイムスタンプが削除されているかチェック
+
         recent_calls = [
-            ts for ts in self.fetcher.call_timestamps 
+            ts for ts in self.fetcher.call_timestamps
             if (datetime.now() - ts).total_seconds() < 60
         ]
-        # 古いタイムスタンプは除外され、新しいリクエストのみが残る
         self.assertEqual(len(recent_calls), 1)
 
 
@@ -582,23 +579,23 @@ class TestAPIUsageStats(unittest.TestCase):
     def test_api_usage_stats_initial_state(self):
         """初期状態のAPI使用統計テスト"""
         stats = self.fetcher.get_api_usage_stats()
-        
+
         self.assertEqual(stats['calls_last_minute'], 0)
         self.assertEqual(stats['calls_last_second'], 0)
-        self.assertEqual(stats['remaining_calls_minute'], 600)
-        self.assertEqual(stats['remaining_calls_second'], 10)
+        # Premium plan: 750 calls/min, 12.5 calls/sec
+        self.assertEqual(stats['remaining_calls_minute'], 750)
         self.assertTrue(stats['api_key_set'])
 
-    def test_api_usage_stats_after_calls(self):
-        """コール実行後のAPI使用統計テスト"""
-        # いくつかのレート制限チェックを実行
+    def test_api_usage_stats_after_calls_in_rate_limiting_mode(self):
+        """rate_limiting_active 時のAPI使用統計テスト"""
+        self.fetcher._activate_rate_limiting(duration_minutes=1)
         for _ in range(3):
             self.fetcher._rate_limit_check()
-        
+
         stats = self.fetcher.get_api_usage_stats()
-        
+
         self.assertEqual(stats['calls_last_minute'], 3)
-        self.assertEqual(stats['remaining_calls_minute'], 597)
+        self.assertEqual(stats['remaining_calls_minute'], 747)
 
 
 class TestEdgeCases(unittest.TestCase):
@@ -635,14 +632,23 @@ class TestEdgeCases(unittest.TestCase):
             self.assertGreater(mock_request.call_count, 10)
 
     @patch('time.sleep')
-    def test_rate_limiting_under_load(self, mock_sleep):
-        """負荷下でのレート制限テスト"""
-        # 短時間で大量のリクエスト
-        for _ in range(15):  # per_second_limitを超える
+    def test_rate_limiting_under_load_when_active(self, mock_sleep):
+        """rate_limiting_active 時の負荷テスト"""
+        self.fetcher._activate_rate_limiting(duration_minutes=1)
+        for _ in range(15):
             self.fetcher._rate_limit_check()
-        
-        # スリープが呼ばれることを確認（レート制限が作動）
+
+        # rate_limiting_active 時はスリープが呼ばれる
         mock_sleep.assert_called()
+
+    @patch('time.sleep')
+    def test_no_sleep_in_max_performance_mode(self, mock_sleep):
+        """max_performance_mode ではスリープしない"""
+        self.assertTrue(self.fetcher.max_performance_mode)
+        for _ in range(15):
+            self.fetcher._rate_limit_check()
+
+        mock_sleep.assert_not_called()
 
 
 class TestHistoricalMarketCap(unittest.TestCase):

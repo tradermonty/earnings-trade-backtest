@@ -660,7 +660,7 @@ class FMPDataFetcher:
                     'date': earning.get('date', ''),  # 実際の決算日
                     'before_after_market': self._parse_timing(earning.get('time', '')),
                     'currency': 'USD',  # FMPは主にUSDデータ
-                    'actual': self._safe_float(earning.get('eps')),  # 修正: epsActual → eps
+                    'actual': self._safe_float(earning.get('eps', earning.get('epsActual'))),
                     'estimate': self._safe_float(earning.get('epsEstimated')),  # FMP uses 'epsEstimated'
                     'difference': 0,  # 後で計算
                     'percent': 0,     # 後で計算
