@@ -31,8 +31,8 @@ class TestBacktestConfig(unittest.TestCase):
 
         self.assertEqual(config.start_date, '2024-01-01')
         self.assertEqual(config.end_date, '2024-01-31')
-        self.assertEqual(config.stop_loss, 6)
-        self.assertEqual(config.initial_capital, 10000)
+        self.assertEqual(config.stop_loss, 10)
+        self.assertEqual(config.initial_capital, 100000)
 
     def test_min_surprise_percent_default_value(self):
         """min_surprise_percent のデフォルト値テスト"""
@@ -155,41 +155,10 @@ class TestRiskManager(unittest.TestCase):
         self.assertEqual(result['shares'], 5)  # 600 / 100.3 = 5.98... -> 5
         self.assertAlmostEqual(result['adjusted_entry_price'], 100.3, places=2)
     
-    def test_check_stop_loss(self):
-        """ストップロス条件のテスト"""
-        # ストップロスに達した場合
-        result = self.risk_manager.check_stop_loss(
-            current_price=94,
-            entry_price=100,
-            stop_loss_percent=6
-        )
-        self.assertTrue(result)
-        
-        # ストップロスに達していない場合
-        result = self.risk_manager.check_stop_loss(
-            current_price=96,
-            entry_price=100,
-            stop_loss_percent=6
-        )
-        self.assertFalse(result)
-    
-    def test_should_partial_profit(self):
-        """部分利確条件のテスト"""
-        # 部分利確ターゲットに達した場合
-        result = self.risk_manager.should_partial_profit(
-            current_price=108,
-            entry_price=100,
-            target_percent=8
-        )
-        self.assertTrue(result)
-        
-        # 部分利確ターゲットに達していない場合
-        result = self.risk_manager.should_partial_profit(
-            current_price=105,
-            entry_price=100,
-            target_percent=8
-        )
-        self.assertFalse(result)
+    def test_risk_manager_has_no_stop_loss_method(self):
+        """check_stop_loss / should_partial_profit はTradeExecutorに移動済み"""
+        self.assertFalse(hasattr(self.risk_manager, 'check_stop_loss'))
+        self.assertFalse(hasattr(self.risk_manager, 'should_partial_profit'))
 
 
 class TestMetricsCalculator(unittest.TestCase):
@@ -275,8 +244,8 @@ class TestEarningsBacktest(unittest.TestCase):
         
         self.assertEqual(config_dict['start_date'], '2024-01-01')
         self.assertEqual(config_dict['end_date'], '2024-01-31')
-        self.assertEqual(config_dict['initial_capital'], 10000)
-        self.assertEqual(config_dict['position_size'], 6)
+        self.assertEqual(config_dict['initial_capital'], 100000)
+        self.assertEqual(config_dict['position_size'], 10)
     
     @patch.object(DataFetcher, 'get_earnings_data')
     @patch.object(DataFilter, 'filter_earnings_data')

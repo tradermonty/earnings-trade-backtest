@@ -241,10 +241,6 @@ class TestEdgeCases(unittest.TestCase):
             slippage=0.3
         )
         self.assertEqual(result['shares'], 0)
-        
-        # ゼロ除算の回避テスト
-        result = risk_manager.check_stop_loss(0, 0, 6)
-        self.assertFalse(result)  # ゼロ価格では損失計算ができないのでFalse
     
     def test_metrics_calculator_edge_cases(self):
         """MetricsCalculator のエッジケースのテスト"""
