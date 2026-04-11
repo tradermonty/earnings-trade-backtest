@@ -38,7 +38,7 @@ class BaseBacktestConfig:
     max_pe_ratio: Optional[float] = None
     min_profit_margin: Optional[float] = None
     screener_price_min: float = 10.0
-    screener_volume_min: int = 200_000
+    # Volume filtering: hardcoded at 200K in DataFilter._check_final_conditions()
     min_market_cap: float = 1e9
     max_market_cap: float = 50e9
 

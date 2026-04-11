@@ -266,7 +266,6 @@ def create_backtest_from_args(args) -> EarningsBacktest:
         min_market_cap=args.min_market_cap * 1e9,  # Convert billions to actual value
         max_market_cap=(args.max_market_cap * 1e9) if args.max_market_cap > 0 else 1e12,
         screener_price_min=args.screener_price_min,
-        screener_volume_min=args.screener_volume_min,
         max_ps_ratio=args.max_ps_ratio,
         max_pe_ratio=args.max_pe_ratio,
         min_profit_margin=args.min_profit_margin,

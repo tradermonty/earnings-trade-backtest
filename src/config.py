@@ -37,7 +37,7 @@ class BacktestConfig:
 
     # FMPスクリーナーパラメータ (ドリフト戦略と同じ)
     screener_price_min: float = 30.0  # $30以上
-    screener_volume_min: int = 200_000
+    # Volume filtering: hardcoded at 200K in DataFilter._check_final_conditions()
 
     # 時価総額ベースフィルタリング設定 (ドリフト戦略と同じ)
     min_market_cap: float = 5e9  # 最小時価総額 ($5B)

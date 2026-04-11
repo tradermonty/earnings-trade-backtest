@@ -380,7 +380,6 @@ def create_dynamic_config(args) -> Optional[DynamicPositionSizeConfig]:
         max_pe_ratio=args.max_pe_ratio,
         min_profit_margin=args.min_profit_margin,
         screener_price_min=args.screener_price_min,
-        screener_volume_min=args.screener_volume_min,
         min_market_cap=args.min_market_cap,
         max_market_cap=args.max_market_cap,
         
@@ -419,7 +418,6 @@ def parse_arguments():
     parser.add_argument('--max_pe_ratio', type=float, help='Maximum P/E ratio')
     parser.add_argument('--min_profit_margin', type=float, help='Minimum profit margin')
     parser.add_argument('--screener_price_min', type=float, default=30.0, help='Minimum stock price for screener')
-    parser.add_argument('--screener_volume_min', type=int, default=200000, help='Minimum volume for screener')
     parser.add_argument('--min_market_cap', type=float, default=5e9, help='Minimum market cap')
     parser.add_argument('--max_market_cap', type=float, default=50e9, help='Maximum market cap')
     
@@ -463,7 +461,6 @@ def main():
         max_pe_ratio=args.max_pe_ratio,
         min_profit_margin=args.min_profit_margin,
         screener_price_min=args.screener_price_min,
-        screener_volume_min=args.screener_volume_min,
         min_market_cap=args.min_market_cap,
         max_market_cap=args.max_market_cap
     )

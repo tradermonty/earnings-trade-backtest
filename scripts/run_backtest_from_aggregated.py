@@ -432,7 +432,6 @@ def main():
         target_symbols=symbols,
         max_gap_percent=args.max_gap,
         screener_price_min=args.min_price,
-        screener_volume_min=args.min_volume,
         min_market_cap=args.min_market_cap * 1e9,
         position_size=args.position_size,
         margin_ratio=args.margin_ratio,

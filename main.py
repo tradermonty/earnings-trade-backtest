@@ -87,9 +87,8 @@ def parse_arguments():
 
     # FMPスクリーナー追加条件
     parser.add_argument('--screener_price_min', type=float, default=30.0,
-                        help='Minimum stock price for FMP screener (default: 10)')
-    parser.add_argument('--screener_volume_min', type=int, default=200000,
-                        help='Minimum average volume for FMP screener (default: 200,000)')
+                        help='Minimum stock price for FMP screener (default: 30)')
+    # Volume filtering is hardcoded at 200K in DataFilter._check_final_conditions()
     # Fundamental filters
     parser.add_argument('--max_ps_ratio', type=float, default=None,
                         help='Maximum P/S ratio for screener (optional)')

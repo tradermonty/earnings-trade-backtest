@@ -149,7 +149,6 @@ class DynamicPositionSizeBacktest:
             max_pe_ratio=self.config.max_pe_ratio,
             min_profit_margin=self.config.min_profit_margin,
             screener_price_min=self.config.screener_price_min,
-            screener_volume_min=self.config.screener_volume_min,
             min_market_cap=self.config.min_market_cap,
             max_market_cap=self.config.max_market_cap
         )

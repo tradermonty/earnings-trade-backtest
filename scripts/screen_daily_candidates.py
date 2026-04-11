@@ -69,8 +69,7 @@ def parse_arguments():
                         help='Minimum stock price')
     parser.add_argument('--min_market_cap', type=float, default=5.0,
                         help='Minimum market cap in billions')
-    parser.add_argument('--min_volume', type=int, default=200000,
-                        help='Minimum 20-day average volume (note: hardcoded at 200K in DataFilter, this value is not used for universe pre-filtering)')
+    # Volume filtering is hardcoded at 200K in DataFilter._check_final_conditions()
 
     # Output options
     parser.add_argument('--output_dir', type=str,
@@ -222,7 +221,6 @@ def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
         max_gap_percent=args.max_gap,
         screener_price_min=args.min_price,
         min_market_cap=args.min_market_cap * 1e9,
-        screener_volume_min=args.min_volume,
     )
 
     data_filter = DataFilter(
