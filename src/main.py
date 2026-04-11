@@ -9,6 +9,7 @@ import logging
 from .config import BacktestConfig, TextConfig
 from .data_fetcher import DataFetcher
 from .data_filter import DataFilter
+from .universe_builder import build_target_universe
 from .risk_manager import RiskManager
 from .trade_executor import TradeExecutor
 from .metrics_calculator import MetricsCalculator
@@ -99,45 +100,16 @@ class EarningsBacktest:
         )
     
     def _get_target_symbols(self) -> Optional[set]:
-        """ターゲット銘柄リストを取得"""
-        symbols = set()
-        
-        if self.config.sp500_only:
-            sp500_symbols = self.data_fetcher.get_sp500_symbols()
-            if sp500_symbols:
-                symbols.update(sp500_symbols)
-                
-        elif self.config.mid_small_only:
-            mid_small_symbols = self.data_fetcher.get_mid_small_symbols(
-                min_market_cap=self.config.min_market_cap,
-                max_market_cap=self.config.max_market_cap
-            )
-            if mid_small_symbols:
-                symbols.update(mid_small_symbols)
-
-        # FMP スクリーナーで基本条件を満たす銘柄を取得
-        elif getattr(self.data_fetcher, 'fmp_fetcher', None):
-            try:
-                total = 0
-                exchanges = ['NYSE', 'NASDAQ', 'AMEX']
-                for ex in exchanges:
-                    lst = self.data_fetcher.fmp_fetcher.stock_screener(
-                        price_more_than=self.config.screener_price_min,
-                        market_cap_more_than=self.config.min_market_cap,
-                        market_cap_less_than=self.config.max_market_cap if self.config.max_market_cap < 1e12 else None,
-                        volume_more_than=self.config.screener_volume_min,
-                        limit=10000,
-                        exchange=ex
-                    )
-                    if lst:
-                        print(f"  {ex}: {len(lst)} symbols")
-                        symbols.update(lst)
-                        total += len(lst)
-                print(f"FMPスクリーナー合計取得数: {total} (重複除外後 {len(symbols)})")
-            except Exception as e:
-                print(f"FMPスクリーナー取得失敗: {e}")
-
-        return symbols if symbols else None
+        """ターゲット銘柄リストを取得（shared universe_builder に委譲）"""
+        return build_target_universe(
+            self.data_fetcher,
+            sp500_only=self.config.sp500_only,
+            mid_small_only=self.config.mid_small_only,
+            min_market_cap=self.config.min_market_cap,
+            max_market_cap=self.config.max_market_cap,
+            screener_price_min=self.config.screener_price_min,
+            screener_volume_min=self.config.screener_volume_min,
+        )
     
     def execute_backtest(self) -> Dict[str, Any]:
         """バックテストの実行"""
@@ -224,8 +196,21 @@ class EarningsBacktest:
             'screener_price_min': self.config.screener_price_min,
             'screener_volume_min': self.config.screener_volume_min,
             'min_market_cap': self.config.min_market_cap,
-            'max_market_cap': self.config.max_market_cap
+            'max_market_cap': self.config.max_market_cap,
+            'universe_source': self._get_universe_source(),
         }
+
+    def _get_universe_source(self) -> str:
+        """Determine which universe path was used."""
+        if self.config.target_symbols:
+            return 'custom'
+        if self.config.sp500_only:
+            return 'sp500'
+        if self.config.mid_small_only:
+            return 'mid_small'
+        if self.config.use_fmp_data and getattr(self.data_fetcher, 'fmp_fetcher', None):
+            return 'fmp_screener'
+        return 'eodhd'
     
     def _generate_reports(self):
         """レポートの生成"""

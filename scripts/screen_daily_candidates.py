@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(project_root, 'src'))
 from src.config import BacktestConfig
 from src.data_fetcher import DataFetcher
 from src.data_filter import DataFilter
+from src.universe_builder import build_target_universe
 
 
 def get_default_date() -> str:
@@ -136,30 +137,56 @@ def calculate_candidate_score(candidate: Dict[str, Any]) -> float:
 def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
     """
     Screen for entry candidates on given date.
-    Uses only data available BEFORE the screen date to avoid look-ahead bias.
+    Uses the same FMP stock_screener pre-filter as the backtest engine
+    to ensure universe consistency.
     """
     print(f"Screening candidates for {date_str}...")
 
     # Initialize data fetcher
     data_fetcher = DataFetcher(use_fmp=True)
 
-    # Get earnings data for the target date
-    # We look at stocks that reported earnings on the previous trading day
+    # Build target universe using the same FMP screener as the backtest
+    target_symbols = build_target_universe(
+        data_fetcher,
+        screener_price_min=args.min_price,
+        min_market_cap=args.min_market_cap * 1e9,
+        screener_volume_min=args.min_volume,
+    )
+
+    # Fail closed: do not fall back to all symbols on screener failure.
+    # target_symbols=None would disable symbol filtering in DataFilter
+    # (data_filter.py:168), silently breaking universe consistency.
+    if target_symbols is None:
+        print("WARNING: FMP screener returned no symbols. Aborting screening.")
+        return []
+
+    print(f"Universe: {len(target_symbols)} symbols from FMP screener")
+
+    # Fetch earnings for prev business day + target date.
+    # AMC reports on prev day produce trade_date == date_str via
+    # DataFilter.determine_trade_date(), so we need both days.
+    # pd.offsets.BDay(1) handles Mon->Fri but not NYSE holidays
+    # (known limitation — market calendar support is a separate ticket).
+    prev_bday = (
+        pd.Timestamp(date_str) - pd.offsets.BDay(1)
+    ).strftime('%Y-%m-%d')
+
     earnings_data = data_fetcher.get_earnings_data(
-        start_date=date_str,
+        start_date=prev_bday,
         end_date=date_str,
-        target_symbols=None  # All symbols
+        target_symbols=list(target_symbols),
     )
 
     if not earnings_data:
-        print(f"No earnings data found for {date_str}")
+        print(f"No earnings data found for {prev_bday} to {date_str}")
         return []
 
-    print(f"Found {len(earnings_data)} earnings reports on {date_str}")
+    earnings_count = len(earnings_data.get('earnings', []))
+    print(f"Found {earnings_count} earnings reports ({prev_bday} to {date_str})")
 
     # Create config for filtering
     config = BacktestConfig(
-        start_date=date_str,
+        start_date=prev_bday,
         end_date=date_str,
         min_surprise_percent=args.min_surprise,
         max_gap_percent=args.max_gap,
@@ -168,10 +195,10 @@ def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
         screener_volume_min=args.min_volume,
     )
 
-    # Initialize data filter
+    # Initialize data filter with the same target_symbols
     data_filter = DataFilter(
         data_fetcher=data_fetcher,
-        target_symbols=None,
+        target_symbols=target_symbols,
         min_surprise_percent=config.min_surprise_percent,
         pre_earnings_change=config.pre_earnings_change,
         max_holding_days=config.max_holding_days,
@@ -180,6 +207,14 @@ def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
 
     # Filter candidates
     filtered_candidates = data_filter.filter_earnings_data(earnings_data)
+
+    # Remove stale candidates from the expanded date window.
+    # The wider fetch picks up prev-day BMO reports whose trade_date
+    # is the prev day, not date_str. Keep only trade_date == date_str.
+    filtered_candidates = [
+        c for c in filtered_candidates if c.get('trade_date') == date_str
+    ]
+
     print(f"After filtering: {len(filtered_candidates)} candidates")
 
     # Build candidate list with scores
@@ -264,6 +299,10 @@ def main():
     print(f"\n=== Results ===")
     print(f"Total candidates: {len(candidates)}")
     print(f"Output saved to: {output_path}")
+
+    print(f"\nNote: Universe based on current-day FMP screener snapshot "
+          f"(price >= ${args.min_price}, market cap >= ${args.min_market_cap}B). "
+          f"This reflects today's fundamentals, not point-in-time values.")
 
     if candidates and args.verbose:
         print(f"\nTop 10 candidates:")

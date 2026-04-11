@@ -289,6 +289,12 @@ class ReportGenerator:
                     <div class="metric-label">Max Holding</div>
                 </div>
             </div>
+            {'<p style="color: ' + self.theme['accent_color'] + '; font-size: 0.85em; margin-top: 12px;">'
+             'Note: When FMP stock screener is used for universe construction, '
+             'it returns a current-day snapshot of prices and market caps. '
+             'For historical backtests the universe may not reflect '
+             'point-in-time values at the backtest start date.'
+             '</p>' if config.get('universe_source') == 'fmp_screener' else ''}
         </div>
     </div>
 

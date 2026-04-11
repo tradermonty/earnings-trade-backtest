@@ -218,5 +218,140 @@ class TestDailyScreenerCLI:
             validate_date('invalid-date')
 
 
+class TestDailyScreenerUniverseIntegration:
+    """Universe pre-filter integration tests"""
+
+    @patch('scripts.screen_daily_candidates.build_target_universe')
+    @patch('scripts.screen_daily_candidates.DataFetcher')
+    def test_screen_candidates_calls_build_target_universe(
+        self, MockDataFetcher, mock_build_universe
+    ):
+        """screen_candidates() should call build_target_universe with CLI params"""
+        mock_build_universe.return_value = {'AAPL', 'MSFT'}
+        mock_fetcher = MockDataFetcher.return_value
+        mock_fetcher.get_earnings_data.return_value = {'earnings': []}
+
+        args = Mock()
+        args.min_price = 30.0
+        args.min_market_cap = 5.0
+        args.min_volume = 200000
+        args.min_surprise = 5.0
+        args.max_gap = 10.0
+
+        from scripts.screen_daily_candidates import screen_candidates
+        screen_candidates('2024-06-15', args)
+
+        mock_build_universe.assert_called_once()
+        call_kwargs = mock_build_universe.call_args.kwargs
+        assert call_kwargs['screener_price_min'] == 30.0
+        assert call_kwargs['min_market_cap'] == 5e9
+
+    @patch('scripts.screen_daily_candidates.build_target_universe')
+    @patch('scripts.screen_daily_candidates.DataFetcher')
+    def test_screen_candidates_fail_closed_on_none_universe(
+        self, MockDataFetcher, mock_build_universe
+    ):
+        """When build_target_universe returns None, return empty list (fail closed)"""
+        mock_build_universe.return_value = None
+
+        args = Mock()
+        args.min_price = 30.0
+        args.min_market_cap = 5.0
+        args.min_volume = 200000
+        args.min_surprise = 5.0
+        args.max_gap = 10.0
+
+        from scripts.screen_daily_candidates import screen_candidates
+        result = screen_candidates('2024-06-15', args)
+
+        assert result == []
+        # get_earnings_data should NOT be called
+        MockDataFetcher.return_value.get_earnings_data.assert_not_called()
+
+    @patch('scripts.screen_daily_candidates.build_target_universe')
+    @patch('scripts.screen_daily_candidates.DataFetcher')
+    def test_screen_candidates_fetches_from_prev_bday(
+        self, MockDataFetcher, mock_build_universe
+    ):
+        """Earnings fetch should start from the previous business day"""
+        mock_build_universe.return_value = {'AAPL'}
+        mock_fetcher = MockDataFetcher.return_value
+        mock_fetcher.get_earnings_data.return_value = {'earnings': []}
+
+        args = Mock()
+        args.min_price = 30.0
+        args.min_market_cap = 5.0
+        args.min_volume = 200000
+        args.min_surprise = 5.0
+        args.max_gap = 10.0
+
+        from scripts.screen_daily_candidates import screen_candidates
+
+        # Wednesday -> prev bday is Tuesday
+        screen_candidates('2026-03-04', args)
+        call_kwargs = mock_fetcher.get_earnings_data.call_args.kwargs
+        assert call_kwargs['start_date'] == '2026-03-03'
+
+    @patch('scripts.screen_daily_candidates.build_target_universe')
+    @patch('scripts.screen_daily_candidates.DataFetcher')
+    def test_screen_candidates_monday_fetches_from_friday(
+        self, MockDataFetcher, mock_build_universe
+    ):
+        """Monday screening should fetch from Friday (prev business day)"""
+        mock_build_universe.return_value = {'AAPL'}
+        mock_fetcher = MockDataFetcher.return_value
+        mock_fetcher.get_earnings_data.return_value = {'earnings': []}
+
+        args = Mock()
+        args.min_price = 30.0
+        args.min_market_cap = 5.0
+        args.min_volume = 200000
+        args.min_surprise = 5.0
+        args.max_gap = 10.0
+
+        from scripts.screen_daily_candidates import screen_candidates
+
+        # 2026-03-09 is Monday
+        screen_candidates('2026-03-09', args)
+        call_kwargs = mock_fetcher.get_earnings_data.call_args.kwargs
+        assert call_kwargs['start_date'] == '2026-03-06'  # Friday
+
+    @patch('scripts.screen_daily_candidates.DataFilter')
+    @patch('scripts.screen_daily_candidates.build_target_universe')
+    @patch('scripts.screen_daily_candidates.DataFetcher')
+    def test_screen_candidates_filters_stale_trade_dates(
+        self, MockDataFetcher, mock_build_universe, MockDataFilter
+    ):
+        """Candidates with trade_date != date_str should be excluded"""
+        mock_build_universe.return_value = {'AAPL', 'MSFT'}
+        mock_fetcher = MockDataFetcher.return_value
+        mock_fetcher.get_earnings_data.return_value = {'earnings': [
+            {'code': 'AAPL.US', 'percent': 10, 'actual': 1.5, 'report_date': '2026-03-03'},
+        ]}
+
+        # DataFilter returns candidates with mixed trade_dates
+        mock_filter_instance = MockDataFilter.return_value
+        mock_filter_instance.filter_earnings_data.return_value = [
+            {'code': 'AAPL', 'trade_date': '2026-03-03', 'percent': 10, 'gap': 5,
+             'prev_close': 150, 'entry_price': 155},
+            {'code': 'MSFT', 'trade_date': '2026-03-02', 'percent': 8, 'gap': 3,
+             'prev_close': 300, 'entry_price': 310},  # stale
+        ]
+
+        args = Mock()
+        args.min_price = 30.0
+        args.min_market_cap = 5.0
+        args.min_volume = 200000
+        args.min_surprise = 5.0
+        args.max_gap = 10.0
+
+        from scripts.screen_daily_candidates import screen_candidates
+        result = screen_candidates('2026-03-03', args)
+
+        # Only AAPL should remain (trade_date matches)
+        assert len(result) == 1
+        assert result[0]['symbol'] == 'AAPL'
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
