@@ -1147,6 +1147,22 @@ class FMPDataFetcher:
         return symbols
 
     # -------------------------------------------------------------------------
+    # Historical Market Cap helpers
+    # -------------------------------------------------------------------------
+    def get_historical_market_cap(self, symbol: str, date: str) -> Optional[float]:
+        """Return market cap for symbol on the given date (or closest prior date).
+
+        Uses FMP historical-market-capitalization endpoint.
+        Returns None if data is unavailable.
+        """
+        data = self._make_request(
+            f'historical-market-capitalization/{symbol}',
+            {'from': date, 'to': date, 'limit': 1},
+        )
+        if data and len(data) > 0:
+            return data[0].get('marketCap')
+        return None
+
     # Financial Ratios helpers
     # -------------------------------------------------------------------------
     def get_latest_financial_ratios(self, symbol: str) -> Optional[Dict[str, Any]]:

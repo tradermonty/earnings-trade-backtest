@@ -268,6 +268,12 @@ class DataFetcher:
             print(f"EODHD決算データの取得中にエラーが発生: {str(e)}")
             raise
 
+    def get_historical_market_cap(self, symbol: str, date: str) -> Optional[float]:
+        """Return market cap for symbol on the given date."""
+        if self.has_fmp_screener:
+            return self.fmp_fetcher.get_historical_market_cap(symbol, date)
+        return None
+
     def get_preopen_price(self, symbol: str, trade_date: str) -> Optional[float]:
         """Return pre-open price using Alpaca first then FMP fallback."""
         # Prefer Alpaca intraday (pre/post market対応)

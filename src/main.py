@@ -72,7 +72,9 @@ class EarningsBacktest:
             min_profit_margin=self.config.min_profit_margin,
             enable_date_validation=self.config.enable_earnings_date_validation,
             api_key=self.api_key,
-            exclude_japanese_adr=self.config.exclude_japanese_adr
+            exclude_japanese_adr=self.config.exclude_japanese_adr,
+            screener_price_min=self.config.screener_price_min,
+            min_market_cap=self.config.min_market_cap,
         )
         
         # リスク管理コンポーネント
@@ -114,6 +116,7 @@ class EarningsBacktest:
             min_market_cap=self.config.min_market_cap,
             max_market_cap=self.config.max_market_cap,
             screener_price_min=self.config.screener_price_min,
+            backtest_mode=True,
         )
     
     def execute_backtest(self) -> Dict[str, Any]:

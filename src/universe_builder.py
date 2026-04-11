@@ -6,8 +6,10 @@ Both the backtest engine (src/main.py) and the daily screener
 to get the same pre-filtered symbol set from the FMP Stock Screener API.
 
 NOTE: The screener uses a *current-day snapshot* of prices, volumes,
-and market caps.  For historical backtests this means the universe
-reflects today's fundamentals, not point-in-time values.
+and market caps.  In backtest_mode, the screener criteria are relaxed
+(price >= $10, mcap >= $1B) to cast a wider net, and DataFilter
+performs point-in-time verification using historical price and
+market cap data at the actual trade date.
 
 Known limitations:
 - Volume filtering is done downstream by DataFilter._check_final_conditions()
@@ -32,6 +34,7 @@ def build_target_universe(
     min_market_cap: float = 5e9,
     max_market_cap: float = 0,
     screener_price_min: float = 30.0,
+    backtest_mode: bool = False,
     exchanges: Optional[List[str]] = None,
 ) -> Tuple[Optional[Set[str]], str]:
     """Build the target symbol universe.
@@ -66,6 +69,15 @@ def build_target_universe(
 
     elif data_fetcher.has_fmp_screener:
         exchanges = exchanges or DEFAULT_EXCHANGES
+        # In backtest mode, use relaxed criteria to cast a wider net.
+        # Point-in-time verification happens in DataFilter using historical data.
+        effective_price = 10.0 if backtest_mode else screener_price_min
+        effective_mcap = 1e9 if backtest_mode else min_market_cap
+        if backtest_mode:
+            logger.info(
+                "Backtest mode: relaxed screener (price>=$%.0f, mcap>=$%.0fB)",
+                effective_price, effective_mcap / 1e9,
+            )
         try:
             total = 0
             effective_max = (
@@ -75,8 +87,8 @@ def build_target_universe(
             )
             for ex in exchanges:
                 lst = data_fetcher.fmp_fetcher.stock_screener(
-                    price_more_than=screener_price_min,
-                    market_cap_more_than=min_market_cap,
+                    price_more_than=effective_price,
+                    market_cap_more_than=effective_mcap,
                     market_cap_less_than=effective_max,
                     limit=10000,
                     exchange=ex,

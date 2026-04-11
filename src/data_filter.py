@@ -70,7 +70,9 @@ class DataFilter:
                  max_ps_ratio: float | None = None, max_pe_ratio: float | None = None,
                  min_profit_margin: float | None = None,
                  enable_date_validation: bool = False, api_key: str = None,
-                 exclude_japanese_adr: bool = True):
+                 exclude_japanese_adr: bool = True,
+                 screener_price_min: float = 10.0,
+                 min_market_cap: float = 0):
         """DataFilterの初期化"""
         self.data_fetcher = data_fetcher
         self.target_symbols = target_symbols
@@ -81,6 +83,8 @@ class DataFilter:
         self.enable_date_validation = enable_date_validation
         self.max_gap_percent = max_gap_percent
         self.exclude_japanese_adr = exclude_japanese_adr
+        self.screener_price_min = screener_price_min
+        self.min_market_cap = min_market_cap
 
         # Fundamental ratio thresholds
         self.max_ps_ratio = max_ps_ratio
@@ -330,7 +334,24 @@ class DataFilter:
                 if not self._check_final_conditions(gap, trade_date_data['Open'], avg_volume):
                     skipped_count += 1
                     continue
-                
+
+                # Point-in-time market cap check (if min_market_cap is set)
+                historical_mcap = None
+                if self.min_market_cap > 0:
+                    historical_mcap = self.data_fetcher.get_historical_market_cap(
+                        symbol, trade_date
+                    )
+                    if historical_mcap is not None:
+                        tqdm.write(f"- 時価総額: ${historical_mcap/1e9:.1f}B (point-in-time)")
+                        if historical_mcap < self.min_market_cap:
+                            tqdm.write(
+                                f"- スキップ: 時価総額が${self.min_market_cap/1e9:.0f}B未満"
+                            )
+                            skipped_count += 1
+                            continue
+                    else:
+                        tqdm.write(f"- 注意: 時価総額データ取得失敗 ({symbol} {trade_date})")
+
                 # データを保存
                 stock_info = {
                     'code': symbol,
@@ -406,8 +427,8 @@ class DataFilter:
         if gap > self.max_gap_percent:
             tqdm.write(f"- スキップ: ギャップ率が{self.max_gap_percent}%を超過")
             return False
-        if price < 10:
-            tqdm.write("- スキップ: 株価が10ドル未満")
+        if price < self.screener_price_min:
+            tqdm.write(f"- スキップ: 株価が${self.screener_price_min:.0f}未満")
             return False
         if avg_volume < 200000:
             tqdm.write("- スキップ: 出来高不足")

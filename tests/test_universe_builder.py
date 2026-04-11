@@ -128,3 +128,25 @@ class TestEdgeCases:
         symbols, source = build_target_universe(fetcher, sp500_only=True)
         assert symbols is None
         assert source == 'sp500'
+
+
+class TestBacktestMode:
+
+    def test_backtest_mode_uses_relaxed_price(self):
+        fetcher = _make_data_fetcher(fmp_symbols=['TEST'])
+        build_target_universe(fetcher, backtest_mode=True, screener_price_min=30.0)
+        call_kwargs = fetcher.fmp_fetcher.stock_screener.call_args_list[0].kwargs
+        assert call_kwargs['price_more_than'] == 10.0  # relaxed from 30
+
+    def test_backtest_mode_uses_relaxed_market_cap(self):
+        fetcher = _make_data_fetcher(fmp_symbols=['TEST'])
+        build_target_universe(fetcher, backtest_mode=True, min_market_cap=5e9)
+        call_kwargs = fetcher.fmp_fetcher.stock_screener.call_args_list[0].kwargs
+        assert call_kwargs['market_cap_more_than'] == 1e9  # relaxed from 5B
+
+    def test_non_backtest_mode_uses_strict_criteria(self):
+        fetcher = _make_data_fetcher(fmp_symbols=['TEST'])
+        build_target_universe(fetcher, backtest_mode=False, screener_price_min=30.0, min_market_cap=5e9)
+        call_kwargs = fetcher.fmp_fetcher.stock_screener.call_args_list[0].kwargs
+        assert call_kwargs['price_more_than'] == 30.0
+        assert call_kwargs['market_cap_more_than'] == 5e9
