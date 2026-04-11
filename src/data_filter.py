@@ -245,7 +245,7 @@ class DataFilter:
                 symbol = earning['code'][:-3]
 
                 # --- Fundamental ratio filter --------------------------------------
-                if any([self.max_ps_ratio, self.max_pe_ratio, self.min_profit_margin]) and getattr(self.data_fetcher, 'fmp_fetcher', None):
+                if any([self.max_ps_ratio, self.max_pe_ratio, self.min_profit_margin]) and self.data_fetcher.has_fmp_screener:
                     ratios = self.data_fetcher.fmp_fetcher.get_latest_financial_ratios(symbol)
                     if ratios is None:
                         skipped_count += 1

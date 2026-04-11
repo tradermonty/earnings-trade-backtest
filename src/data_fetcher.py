@@ -40,6 +40,11 @@ class DataFetcher:
             self.alpaca_fetcher = None
             logging.info(f"AlpacaDataFetcher not available: {e}")
     
+    @property
+    def has_fmp_screener(self) -> bool:
+        """Whether the FMP stock screener is available."""
+        return self.fmp_fetcher is not None
+
     def _load_api_key(self) -> str:
         """EODHDのAPIキーを読み込む"""
         load_dotenv()

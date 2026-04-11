@@ -134,38 +134,14 @@ def calculate_candidate_score(candidate: Dict[str, Any]) -> float:
     return round(score, 1)
 
 
-def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
+def _fetch_earnings_for_date(data_fetcher, date_str, target_symbols):
+    """Fetch earnings data covering prev business day + target date.
+
+    AMC reports on prev day produce trade_date == date_str via
+    DataFilter.determine_trade_date(), so we need both days.
+    pd.offsets.BDay(1) handles Mon->Fri but not NYSE holidays
+    (known limitation — market calendar support is a separate ticket).
     """
-    Screen for entry candidates on given date.
-    Uses the same FMP stock_screener pre-filter as the backtest engine
-    to ensure universe consistency.
-    """
-    print(f"Screening candidates for {date_str}...")
-
-    # Initialize data fetcher
-    data_fetcher = DataFetcher(use_fmp=True)
-
-    # Build target universe using the same FMP screener as the backtest
-    target_symbols = build_target_universe(
-        data_fetcher,
-        screener_price_min=args.min_price,
-        min_market_cap=args.min_market_cap * 1e9,
-    )
-
-    # Fail closed: do not fall back to all symbols on screener failure.
-    # target_symbols=None would disable symbol filtering in DataFilter
-    # (data_filter.py:168), silently breaking universe consistency.
-    if target_symbols is None:
-        print("WARNING: FMP screener returned no symbols. Aborting screening.")
-        return []
-
-    print(f"Universe: {len(target_symbols)} symbols from FMP screener")
-
-    # Fetch earnings for prev business day + target date.
-    # AMC reports on prev day produce trade_date == date_str via
-    # DataFilter.determine_trade_date(), so we need both days.
-    # pd.offsets.BDay(1) handles Mon->Fri but not NYSE holidays
-    # (known limitation — market calendar support is a separate ticket).
     prev_bday = (
         pd.Timestamp(date_str) - pd.offsets.BDay(1)
     ).strftime('%Y-%m-%d')
@@ -175,49 +151,11 @@ def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
         end_date=date_str,
         target_symbols=list(target_symbols),
     )
+    return earnings_data, prev_bday
 
-    if not earnings_data:
-        print(f"No earnings data found for {prev_bday} to {date_str}")
-        return []
 
-    earnings_count = len(earnings_data.get('earnings', []))
-    print(f"Found {earnings_count} earnings reports ({prev_bday} to {date_str})")
-
-    # Create config for filtering
-    config = BacktestConfig(
-        start_date=prev_bday,
-        end_date=date_str,
-        min_surprise_percent=args.min_surprise,
-        max_gap_percent=args.max_gap,
-        screener_price_min=args.min_price,
-        min_market_cap=args.min_market_cap * 1e9,
-        screener_volume_min=args.min_volume,
-    )
-
-    # Initialize data filter with the same target_symbols
-    data_filter = DataFilter(
-        data_fetcher=data_fetcher,
-        target_symbols=target_symbols,
-        min_surprise_percent=config.min_surprise_percent,
-        pre_earnings_change=config.pre_earnings_change,
-        max_holding_days=config.max_holding_days,
-        max_gap_percent=config.max_gap_percent,
-    )
-
-    # Filter candidates
-    filtered_candidates = data_filter.filter_earnings_data(earnings_data)
-
-    # Remove stale candidates from the expanded date window.
-    # The wider fetch picks up prev-day BMO reports whose trade_date
-    # is the prev day, not date_str. Keep only trade_date == date_str.
-    filtered_candidates = [
-        c for c in filtered_candidates if c.get('trade_date') == date_str
-    ]
-
-    print(f"After filtering: {len(filtered_candidates)} candidates")
-
-    # Build candidate list with scores
-    # Note: DataFilter returns data with keys: code, gap, percent, prev_close, entry_price, etc.
+def _build_scored_candidates(filtered_candidates, date_str):
+    """Transform DataFilter output into scored, sorted candidate dicts."""
     candidates = []
     for item in filtered_candidates:
         candidate = {
@@ -237,10 +175,76 @@ def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
         candidate['score'] = calculate_candidate_score(candidate)
         candidates.append(candidate)
 
-    # Sort by score descending
     candidates.sort(key=lambda x: x['score'], reverse=True)
-
     return candidates
+
+
+def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
+    """Screen for entry candidates on given date.
+
+    Uses the same FMP stock_screener pre-filter as the backtest engine
+    to ensure universe consistency.
+    """
+    print(f"Screening candidates for {date_str}...")
+
+    data_fetcher = DataFetcher(use_fmp=True)
+
+    # 1. Build target universe
+    target_symbols, _source = build_target_universe(
+        data_fetcher,
+        screener_price_min=args.min_price,
+        min_market_cap=args.min_market_cap * 1e9,
+    )
+
+    if target_symbols is None:
+        print("WARNING: FMP screener returned no symbols. Aborting screening.")
+        return []
+
+    print(f"Universe: {len(target_symbols)} symbols from FMP screener")
+
+    # 2. Fetch earnings (prev business day + target date)
+    earnings_data, prev_bday = _fetch_earnings_for_date(
+        data_fetcher, date_str, target_symbols,
+    )
+
+    if not earnings_data:
+        print(f"No earnings data found for {prev_bday} to {date_str}")
+        return []
+
+    earnings_count = len(earnings_data.get('earnings', []))
+    print(f"Found {earnings_count} earnings reports ({prev_bday} to {date_str})")
+
+    # 3. Filter candidates
+    config = BacktestConfig(
+        start_date=prev_bday,
+        end_date=date_str,
+        min_surprise_percent=args.min_surprise,
+        max_gap_percent=args.max_gap,
+        screener_price_min=args.min_price,
+        min_market_cap=args.min_market_cap * 1e9,
+        screener_volume_min=args.min_volume,
+    )
+
+    data_filter = DataFilter(
+        data_fetcher=data_fetcher,
+        target_symbols=target_symbols,
+        min_surprise_percent=config.min_surprise_percent,
+        pre_earnings_change=config.pre_earnings_change,
+        max_holding_days=config.max_holding_days,
+        max_gap_percent=config.max_gap_percent,
+    )
+
+    filtered_candidates = data_filter.filter_earnings_data(earnings_data)
+
+    # Remove stale candidates from the expanded date window
+    filtered_candidates = [
+        c for c in filtered_candidates if c.get('trade_date') == date_str
+    ]
+
+    print(f"After filtering: {len(filtered_candidates)} candidates")
+
+    # 4. Score and rank
+    return _build_scored_candidates(filtered_candidates, date_str)
 
 
 def save_candidates_to_csv(candidates: List[Dict[str, Any]], output_path: str) -> None:

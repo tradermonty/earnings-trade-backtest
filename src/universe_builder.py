@@ -15,7 +15,7 @@ Known limitations:
 """
 
 import logging
-from typing import Optional, Set, List
+from typing import Optional, Set, List, Tuple
 
 from .data_fetcher import DataFetcher
 
@@ -33,17 +33,19 @@ def build_target_universe(
     max_market_cap: float = 0,
     screener_price_min: float = 30.0,
     exchanges: Optional[List[str]] = None,
-) -> Optional[Set[str]]:
+) -> Tuple[Optional[Set[str]], str]:
     """Build the target symbol universe.
 
-    Returns a set of ticker symbols, or None when the universe
-    could not be determined (callers should treat None as "all symbols"
-    in backtest mode, or abort in screener mode).
+    Returns (symbols, source_label):
+      - symbols: set of ticker symbols, or None if no symbols found
+      - source_label: which path was taken (authoritative, not re-derived)
 
-    Three mutually-exclusive modes, checked in priority order:
-      1. sp500_only     -- S&P 500 constituents
-      2. mid_small_only -- mid/small cap via FMP screener
-      3. (default)      -- FMP stock_screener with price/cap filters
+    Source labels:
+      'sp500'               — S&P 500 constituents
+      'mid_small'           — mid/small cap via FMP screener
+      'fmp_screener'        — FMP stock_screener (success or empty result)
+      'fmp_screener_failed' — FMP stock_screener attempted but exception
+      'none'                — no screener path applicable
     """
     symbols: Set[str] = set()
 
@@ -51,6 +53,7 @@ def build_target_universe(
         sp500 = data_fetcher.get_sp500_symbols()
         if sp500:
             symbols.update(sp500)
+        return (symbols if symbols else None, 'sp500')
 
     elif mid_small_only:
         mid_small = data_fetcher.get_mid_small_symbols(
@@ -59,8 +62,9 @@ def build_target_universe(
         )
         if mid_small:
             symbols.update(mid_small)
+        return (symbols if symbols else None, 'mid_small')
 
-    elif getattr(data_fetcher, 'fmp_fetcher', None):
+    elif data_fetcher.has_fmp_screener:
         exchanges = exchanges or DEFAULT_EXCHANGES
         try:
             total = 0
@@ -78,15 +82,16 @@ def build_target_universe(
                     exchange=ex,
                 )
                 if lst:
-                    print(f"  {ex}: {len(lst)} symbols")
+                    logger.info("  %s: %d symbols", ex, len(lst))
                     symbols.update(lst)
                     total += len(lst)
-            print(
-                f"FMPスクリーナー合計取得数: {total} "
-                f"(重複除外後 {len(symbols)})"
+            logger.info(
+                "FMPスクリーナー合計取得数: %d (重複除外後 %d)",
+                total, len(symbols),
             )
+            return (symbols if symbols else None, 'fmp_screener')
         except Exception as e:
-            logger.error(f"FMPスクリーナー取得失敗: {e}")
-            print(f"FMPスクリーナー取得失敗: {e}")
+            logger.error("FMPスクリーナー取得失敗: %s", e)
+            return (None, 'fmp_screener_failed')
 
-    return symbols if symbols else None
+    return (None, 'none')

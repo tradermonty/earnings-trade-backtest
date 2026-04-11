@@ -47,16 +47,16 @@ class EarningsBacktest:
         self.api_key = self.data_fetcher.api_key
         
         # 銘柄リストの取得
-        # config.target_symbols が指定されている場合はそれを優先する
         if self.config.target_symbols:
-            # 既に set 型で渡されている想定だが、防御的に変換しておく
             self.target_symbols = set(self.config.target_symbols)
+            self._universe_source = 'custom'
         else:
-            self.target_symbols = self._get_target_symbols()
+            self.target_symbols, self._universe_source = self._get_target_symbols()
             if self.target_symbols is None:
                 logging.warning(
-                    "Universe build returned no symbols. "
-                    "Backtest will run against all earnings (no pre-filter)."
+                    "Universe build returned no symbols (source=%s). "
+                    "Backtest will run against all earnings (no pre-filter).",
+                    self._universe_source,
                 )
 
         # データフィルタリングコンポーネント
@@ -104,8 +104,9 @@ class EarningsBacktest:
             data_fetcher=self.data_fetcher
         )
     
-    def _get_target_symbols(self) -> Optional[set]:
-        """ターゲット銘柄リストを取得（shared universe_builder に委譲）"""
+    def _get_target_symbols(self):
+        """ターゲット銘柄リストを取得（shared universe_builder に委譲）
+        Returns (Optional[Set[str]], str) tuple from build_target_universe."""
         return build_target_universe(
             self.data_fetcher,
             sp500_only=self.config.sp500_only,
@@ -200,20 +201,8 @@ class EarningsBacktest:
             'screener_price_min': self.config.screener_price_min,
             'min_market_cap': self.config.min_market_cap,
             'max_market_cap': self.config.max_market_cap,
-            'universe_source': self._get_universe_source(),
+            'universe_source': self._universe_source,
         }
-
-    def _get_universe_source(self) -> str:
-        """Determine which universe path was used."""
-        if self.config.target_symbols:
-            return 'custom'
-        if self.config.sp500_only:
-            return 'sp500'
-        if self.config.mid_small_only:
-            return 'mid_small'
-        if self.config.use_fmp_data and getattr(self.data_fetcher, 'fmp_fetcher', None):
-            return 'fmp_screener'
-        return 'eodhd'
     
     def _generate_reports(self):
         """レポートの生成"""

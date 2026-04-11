@@ -227,7 +227,7 @@ class TestDailyScreenerUniverseIntegration:
         self, MockDataFetcher, mock_build_universe
     ):
         """screen_candidates() should call build_target_universe with CLI params"""
-        mock_build_universe.return_value = {'AAPL', 'MSFT'}
+        mock_build_universe.return_value = ({'AAPL', 'MSFT'}, 'fmp_screener')
         mock_fetcher = MockDataFetcher.return_value
         mock_fetcher.get_earnings_data.return_value = {'earnings': []}
 
@@ -252,7 +252,7 @@ class TestDailyScreenerUniverseIntegration:
         self, MockDataFetcher, mock_build_universe
     ):
         """When build_target_universe returns None, return empty list (fail closed)"""
-        mock_build_universe.return_value = None
+        mock_build_universe.return_value = (None, 'fmp_screener_failed')
 
         args = Mock()
         args.min_price = 30.0
@@ -274,7 +274,7 @@ class TestDailyScreenerUniverseIntegration:
         self, MockDataFetcher, mock_build_universe
     ):
         """Earnings fetch should start from the previous business day"""
-        mock_build_universe.return_value = {'AAPL'}
+        mock_build_universe.return_value = ({'AAPL'}, 'fmp_screener')
         mock_fetcher = MockDataFetcher.return_value
         mock_fetcher.get_earnings_data.return_value = {'earnings': []}
 
@@ -298,7 +298,7 @@ class TestDailyScreenerUniverseIntegration:
         self, MockDataFetcher, mock_build_universe
     ):
         """Monday screening should fetch from Friday (prev business day)"""
-        mock_build_universe.return_value = {'AAPL'}
+        mock_build_universe.return_value = ({'AAPL'}, 'fmp_screener')
         mock_fetcher = MockDataFetcher.return_value
         mock_fetcher.get_earnings_data.return_value = {'earnings': []}
 
@@ -323,7 +323,7 @@ class TestDailyScreenerUniverseIntegration:
         self, MockDataFetcher, mock_build_universe, MockDataFilter
     ):
         """Candidates with trade_date != date_str should be excluded"""
-        mock_build_universe.return_value = {'AAPL', 'MSFT'}
+        mock_build_universe.return_value = ({'AAPL', 'MSFT'}, 'fmp_screener')
         mock_fetcher = MockDataFetcher.return_value
         mock_fetcher.get_earnings_data.return_value = {'earnings': [
             {'code': 'AAPL.US', 'percent': 10, 'actual': 1.5, 'report_date': '2026-03-03'},
@@ -384,7 +384,7 @@ class TestCriticalBugRegressions:
         self, MockDataFetcher, mock_build_universe, MockDataFilter
     ):
         """C-2: pre_change from DataFilter must flow into scoring (regression for pre_earnings_change)"""
-        mock_build_universe.return_value = {'AAPL', 'MSFT'}
+        mock_build_universe.return_value = ({'AAPL', 'MSFT'}, 'fmp_screener')
         mock_fetcher = MockDataFetcher.return_value
         mock_fetcher.get_earnings_data.return_value = {'earnings': []}
 
