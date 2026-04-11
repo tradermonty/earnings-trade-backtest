@@ -1164,7 +1164,15 @@ class FMPDataFetcher:
             {'from': lookback, 'to': date, 'limit': 5},
         )
         if data and len(data) > 0:
-            return data[0].get('marketCap')
+            # Select the entry with the latest date <= trade_date,
+            # regardless of API response ordering.
+            best = max(
+                (d for d in data if d.get('date', '') <= date),
+                key=lambda d: d.get('date', ''),
+                default=None,
+            )
+            if best is not None:
+                return best.get('marketCap')
         return None
 
     # Financial Ratios helpers

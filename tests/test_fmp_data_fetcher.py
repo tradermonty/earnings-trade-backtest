@@ -672,12 +672,34 @@ class TestHistoricalMarketCap(unittest.TestCase):
     @patch.object(FMPDataFetcher, '_make_request')
     def test_uses_7_day_lookback_window(self, mock_request):
         """Monday trade_date should look back to previous week for Friday data"""
-        mock_request.return_value = [{'marketCap': 5e9}]
+        mock_request.return_value = [{'date': '2026-03-06', 'marketCap': 5e9}]
         self.fetcher.get_historical_market_cap('SEE', '2026-03-09')  # Monday
         call_args = mock_request.call_args
         params = call_args[0][1]
         assert params['from'] == '2026-03-02'  # 7 days back
         assert params['to'] == '2026-03-09'
+
+    @patch.object(FMPDataFetcher, '_make_request')
+    def test_selects_closest_prior_date_regardless_of_order(self, mock_request):
+        """Should pick the latest date <= trade_date, not just data[0]"""
+        # API returns ascending order (oldest first)
+        mock_request.return_value = [
+            {'date': '2026-03-04', 'marketCap': 4e9},
+            {'date': '2026-03-05', 'marketCap': 5e9},
+            {'date': '2026-03-06', 'marketCap': 6e9},
+        ]
+        result = self.fetcher.get_historical_market_cap('TEST', '2026-03-09')
+        assert result == 6e9  # Friday 3/6, not Tuesday 3/4
+
+    @patch.object(FMPDataFetcher, '_make_request')
+    def test_excludes_dates_after_trade_date(self, mock_request):
+        """Should not use data points after the trade_date"""
+        mock_request.return_value = [
+            {'date': '2026-03-05', 'marketCap': 5e9},
+            {'date': '2026-03-10', 'marketCap': 10e9},  # after trade_date
+        ]
+        result = self.fetcher.get_historical_market_cap('TEST', '2026-03-09')
+        assert result == 5e9  # only 3/5 qualifies
 
 
 class TestCheckHistoricalMarketCap(unittest.TestCase):
