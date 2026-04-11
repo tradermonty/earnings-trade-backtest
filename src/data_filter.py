@@ -224,7 +224,7 @@ class DataFilter:
         print("\n=== 第2段階フィルタリング ===")
         print("条件:")
         print("4. ギャップ率0%以上")
-        print("5. 株価10ドル以上")
+        print(f"5. 株価${self.screener_price_min:.0f}以上")
         print("6. 20日平均出来高20万株以上")
         print(f"7. 過去20日間の価格変化率{self.pre_earnings_change}%以上")
         print(f"8. ギャップ上限: {self.max_gap_percent}% 以下")
@@ -232,6 +232,7 @@ class DataFilter:
         date_stocks = defaultdict(list)
         processed_count = 0
         skipped_count = 0
+        mcap_none_count = 0
         
         # tqdmを使用してプログレスバーを表示
         for earning in tqdm(first_filtered, desc="第2段階フィルタリング"):
@@ -335,22 +336,15 @@ class DataFilter:
                     skipped_count += 1
                     continue
 
-                # Point-in-time market cap check (if min_market_cap is set)
-                historical_mcap = None
-                if self.min_market_cap > 0:
-                    historical_mcap = self.data_fetcher.get_historical_market_cap(
-                        symbol, trade_date
-                    )
-                    if historical_mcap is not None:
-                        tqdm.write(f"- 時価総額: ${historical_mcap/1e9:.1f}B (point-in-time)")
-                        if historical_mcap < self.min_market_cap:
-                            tqdm.write(
-                                f"- スキップ: 時価総額が${self.min_market_cap/1e9:.0f}B未満"
-                            )
-                            skipped_count += 1
-                            continue
-                    else:
-                        tqdm.write(f"- 注意: 時価総額データ取得失敗 ({symbol} {trade_date})")
+                # Point-in-time market cap check
+                mcap_passed, mcap_missing = self._check_historical_market_cap(
+                    symbol, trade_date
+                )
+                if not mcap_passed:
+                    skipped_count += 1
+                    continue
+                if mcap_missing:
+                    mcap_none_count += 1
 
                 # データを保存
                 stock_info = {
@@ -384,9 +378,35 @@ class DataFilter:
         print(f"- 条件適合: {processed_count}")
         print(f"- スキップ: {skipped_count}")
         print(f"- 最終選択銘柄数: {len(selected_stocks)}")
-        
+
+        if mcap_none_count > 0 and self.min_market_cap > 0:
+            pct = mcap_none_count / max(len(first_filtered), 1) * 100
+            print(f"- 警告: 時価総額データ取得失敗 {mcap_none_count}件 ({pct:.0f}%)")
+            if mcap_none_count == len(first_filtered):
+                print("- 警告: 全銘柄で時価総額データ取得失敗。APIプランまたはデータソースを確認してください。")
+
         return selected_stocks
-    
+
+    def _check_historical_market_cap(self, symbol: str, trade_date: str):
+        """Point-in-time market cap check. Returns (passed, mcap_missing)."""
+        if self.min_market_cap <= 0:
+            return True, False
+
+        historical_mcap = self.data_fetcher.get_historical_market_cap(
+            symbol, trade_date
+        )
+        if historical_mcap is not None:
+            tqdm.write(f"- 時価総額: ${historical_mcap/1e9:.1f}B (point-in-time)")
+            if historical_mcap < self.min_market_cap:
+                tqdm.write(
+                    f"- スキップ: 時価総額が${self.min_market_cap/1e9:.0f}B未満"
+                )
+                return False, False
+            return True, False
+        else:
+            tqdm.write(f"- 注意: 時価総額データ取得失敗 ({symbol} {trade_date})")
+            return True, True  # fail-open
+
     def _check_price_change(self, stock_data: pd.DataFrame, trade_date: str, symbol: str):
         """過去20日間の価格変化率をチェック。(passed, value) を返す。"""
         try:

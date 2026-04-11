@@ -645,6 +645,80 @@ class TestEdgeCases(unittest.TestCase):
         mock_sleep.assert_called()
 
 
+class TestHistoricalMarketCap(unittest.TestCase):
+    """get_historical_market_cap のテスト"""
+
+    def setUp(self):
+        self.fetcher = FMPDataFetcher(api_key="test_key")
+
+    @patch.object(FMPDataFetcher, '_make_request')
+    def test_returns_market_cap_from_api(self, mock_request):
+        mock_request.return_value = [{'symbol': 'AAPL', 'date': '2026-03-03', 'marketCap': 3_000_000_000_000}]
+        result = self.fetcher.get_historical_market_cap('AAPL', '2026-03-03')
+        assert result == 3_000_000_000_000
+
+    @patch.object(FMPDataFetcher, '_make_request')
+    def test_returns_none_when_empty_list(self, mock_request):
+        mock_request.return_value = []
+        result = self.fetcher.get_historical_market_cap('DELISTED', '2020-01-01')
+        assert result is None
+
+    @patch.object(FMPDataFetcher, '_make_request')
+    def test_returns_none_when_api_returns_none(self, mock_request):
+        mock_request.return_value = None
+        result = self.fetcher.get_historical_market_cap('AAPL', '2026-03-03')
+        assert result is None
+
+    @patch.object(FMPDataFetcher, '_make_request')
+    def test_uses_7_day_lookback_window(self, mock_request):
+        """Monday trade_date should look back to previous week for Friday data"""
+        mock_request.return_value = [{'marketCap': 5e9}]
+        self.fetcher.get_historical_market_cap('SEE', '2026-03-09')  # Monday
+        call_args = mock_request.call_args
+        params = call_args[0][1]
+        assert params['from'] == '2026-03-02'  # 7 days back
+        assert params['to'] == '2026-03-09'
+
+
+class TestCheckHistoricalMarketCap(unittest.TestCase):
+    """DataFilter._check_historical_market_cap のテスト"""
+
+    def _make_filter(self, min_market_cap=0, mcap_return=None):
+        from src.data_filter import DataFilter
+        mock_fetcher = Mock()
+        mock_fetcher.get_historical_market_cap.return_value = mcap_return
+        mock_fetcher.has_fmp_screener = True
+        df = DataFilter(
+            data_fetcher=mock_fetcher,
+            target_symbols=None,
+            min_surprise_percent=5.0,
+            min_market_cap=min_market_cap,
+        )
+        return df
+
+    def test_passes_when_min_market_cap_is_zero(self):
+        df = self._make_filter(min_market_cap=0)
+        passed, missing = df._check_historical_market_cap('AAPL', '2026-03-03')
+        assert passed is True
+        assert missing is False
+
+    def test_rejects_when_mcap_below_threshold(self):
+        df = self._make_filter(min_market_cap=5e9, mcap_return=3e9)
+        passed, missing = df._check_historical_market_cap('SMALL', '2026-03-03')
+        assert passed is False
+
+    def test_passes_when_mcap_above_threshold(self):
+        df = self._make_filter(min_market_cap=5e9, mcap_return=10e9)
+        passed, missing = df._check_historical_market_cap('BIG', '2026-03-03')
+        assert passed is True
+        assert missing is False
+
+    def test_fail_open_when_mcap_is_none(self):
+        df = self._make_filter(min_market_cap=5e9, mcap_return=None)
+        passed, missing = df._check_historical_market_cap('UNKNOWN', '2026-03-03')
+        assert passed is True   # fail-open
+        assert missing is True  # signals data was missing
+
+
 if __name__ == '__main__':
-    # テストスイートの実行
     unittest.main(verbosity=2)

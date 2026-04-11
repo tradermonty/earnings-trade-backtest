@@ -232,6 +232,8 @@ def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
         pre_earnings_change=config.pre_earnings_change,
         max_holding_days=config.max_holding_days,
         max_gap_percent=config.max_gap_percent,
+        screener_price_min=args.min_price,
+        min_market_cap=args.min_market_cap * 1e9,
     )
 
     filtered_candidates = data_filter.filter_earnings_data(earnings_data)

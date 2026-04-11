@@ -1150,14 +1150,18 @@ class FMPDataFetcher:
     # Historical Market Cap helpers
     # -------------------------------------------------------------------------
     def get_historical_market_cap(self, symbol: str, date: str) -> Optional[float]:
-        """Return market cap for symbol on the given date (or closest prior date).
+        """Return market cap for symbol on or before the given date.
 
-        Uses FMP historical-market-capitalization endpoint.
+        Uses FMP historical-market-capitalization endpoint with a 7-day
+        lookback window to handle weekends and holidays (e.g., Monday
+        trade_date needs Friday's market cap data).
         Returns None if data is unavailable.
         """
+        dt = datetime.strptime(date, '%Y-%m-%d')
+        lookback = (dt - timedelta(days=7)).strftime('%Y-%m-%d')
         data = self._make_request(
             f'historical-market-capitalization/{symbol}',
-            {'from': date, 'to': date, 'limit': 1},
+            {'from': lookback, 'to': date, 'limit': 5},
         )
         if data and len(data) > 0:
             return data[0].get('marketCap')
