@@ -70,7 +70,7 @@ def parse_arguments():
     parser.add_argument('--min_market_cap', type=float, default=5.0,
                         help='Minimum market cap in billions')
     parser.add_argument('--min_volume', type=int, default=200000,
-                        help='Minimum 20-day average volume')
+                        help='Minimum 20-day average volume (note: hardcoded at 200K in DataFilter, this value is not used for universe pre-filtering)')
 
     # Output options
     parser.add_argument('--output_dir', type=str,
@@ -150,7 +150,6 @@ def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
         data_fetcher,
         screener_price_min=args.min_price,
         min_market_cap=args.min_market_cap * 1e9,
-        screener_volume_min=args.min_volume,
     )
 
     # Fail closed: do not fall back to all symbols on screener failure.

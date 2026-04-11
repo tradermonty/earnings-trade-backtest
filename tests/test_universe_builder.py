@@ -40,12 +40,10 @@ class TestFMPScreenerDefaultPath:
             fetcher,
             screener_price_min=50.0,
             min_market_cap=10e9,
-            screener_volume_min=500_000,
         )
         call_kwargs = fetcher.fmp_fetcher.stock_screener.call_args_list[0].kwargs
         assert call_kwargs['price_more_than'] == 50.0
         assert call_kwargs['market_cap_more_than'] == 10e9
-        assert call_kwargs['volume_more_than'] == 500_000
 
     def test_max_market_cap_passed_when_below_threshold(self):
         fetcher = _make_data_fetcher(fmp_symbols=['X'])

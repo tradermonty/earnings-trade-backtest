@@ -10,10 +10,8 @@ and market caps.  For historical backtests this means the universe
 reflects today's fundamentals, not point-in-time values.
 
 Known limitations:
-- screener_volume_min is accepted for interface compatibility but
-  fmp_data_fetcher.stock_screener() intentionally ignores it.
-  Volume filtering is done downstream by DataFilter._check_final_conditions()
-  with a hardcoded 200,000 threshold.
+- Volume filtering is done downstream by DataFilter._check_final_conditions()
+  with a hardcoded 200,000 threshold, not at the screener stage.
 """
 
 import logging
@@ -34,7 +32,6 @@ def build_target_universe(
     min_market_cap: float = 5e9,
     max_market_cap: float = 0,
     screener_price_min: float = 30.0,
-    screener_volume_min: int = 200_000,
     exchanges: Optional[List[str]] = None,
 ) -> Optional[Set[str]]:
     """Build the target symbol universe.
@@ -77,7 +74,6 @@ def build_target_universe(
                     price_more_than=screener_price_min,
                     market_cap_more_than=min_market_cap,
                     market_cap_less_than=effective_max,
-                    volume_more_than=screener_volume_min,
                     limit=10000,
                     exchange=ex,
                 )

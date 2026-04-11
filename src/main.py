@@ -53,7 +53,12 @@ class EarningsBacktest:
             self.target_symbols = set(self.config.target_symbols)
         else:
             self.target_symbols = self._get_target_symbols()
-        
+            if self.target_symbols is None:
+                logging.warning(
+                    "Universe build returned no symbols. "
+                    "Backtest will run against all earnings (no pre-filter)."
+                )
+
         # データフィルタリングコンポーネント
         self.data_filter = DataFilter(
             data_fetcher=self.data_fetcher,
@@ -108,7 +113,6 @@ class EarningsBacktest:
             min_market_cap=self.config.min_market_cap,
             max_market_cap=self.config.max_market_cap,
             screener_price_min=self.config.screener_price_min,
-            screener_volume_min=self.config.screener_volume_min,
         )
     
     def execute_backtest(self) -> Dict[str, Any]:
@@ -194,7 +198,6 @@ class EarningsBacktest:
             'margin_ratio': self.config.margin_ratio,
             'max_gap_percent': self.config.max_gap_percent,
             'screener_price_min': self.config.screener_price_min,
-            'screener_volume_min': self.config.screener_volume_min,
             'min_market_cap': self.config.min_market_cap,
             'max_market_cap': self.config.max_market_cap,
             'universe_source': self._get_universe_source(),
