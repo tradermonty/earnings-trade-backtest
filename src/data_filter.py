@@ -103,13 +103,16 @@ class DataFilter:
     def determine_trade_date(self, report_date: str, market_timing: str) -> str:
         """決算発表タイミングに基づいてトレード日を決定"""
         base_date = datetime.strptime(report_date, '%Y-%m-%d')
-        
+
         if market_timing and 'Before' in market_timing:
             # 開始前なら当日にトレード
             return base_date.strftime('%Y-%m-%d')
         else:
-            # 終了後または不明な場合は翌日にトレード
+            # 終了後または不明な場合は翌営業日にトレード
             trade_date = base_date + timedelta(days=1)
+            # 週末をスキップ（金曜AMC → 月曜）
+            while trade_date.weekday() >= 5:
+                trade_date += timedelta(days=1)
             return trade_date.strftime('%Y-%m-%d')
     
     def filter_earnings_data(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -291,7 +294,7 @@ class DataFilter:
                 stock_data = stock_data.set_index('date')
 
                 # 過去20日間の価格変化率を計算
-                price_change_passed = self._check_price_change(
+                price_change_passed, pre_change_value = self._check_price_change(
                     stock_data, trade_date, symbol
                 )
                 if not price_change_passed:
@@ -339,7 +342,8 @@ class DataFilter:
                     'gap': gap,
                     'volume': trade_date_data['Volume'],
                     'avg_volume': avg_volume,
-                    'percent': float(earning['percent'])
+                    'percent': float(earning['percent']),
+                    'pre_change': pre_change_value,
                 }
                 
                 date_stocks[trade_date].append(stock_info)
@@ -362,22 +366,22 @@ class DataFilter:
         
         return selected_stocks
     
-    def _check_price_change(self, stock_data: pd.DataFrame, trade_date: str, symbol: str) -> bool:
-        """過去20日間の価格変化率をチェック"""
+    def _check_price_change(self, stock_data: pd.DataFrame, trade_date: str, symbol: str):
+        """過去20日間の価格変化率をチェック。(passed, value) を返す。"""
         try:
             current_close = stock_data.loc[:trade_date].iloc[-1]['Close']
             price_20d_ago = stock_data.loc[:trade_date].iloc[-20]['Close']
             price_change = ((current_close - price_20d_ago) / price_20d_ago) * 100
             tqdm.write(f"- 過去20日間の価格変化率: {price_change:.1f}%")
-            
+
             if price_change < self.pre_earnings_change:
                 tqdm.write(f"- スキップ: 価格変化率が{self.pre_earnings_change}%未満")
-                return False
-            return True
-            
+                return False, price_change
+            return True, price_change
+
         except (KeyError, IndexError):
             tqdm.write("- スキップ: 20日分の価格データなし")
-            return False
+            return False, 0.0
     
     def _get_trade_date_data(self, stock_data: pd.DataFrame, trade_date: str, symbol: str):
         """トレード日のデータを取得"""
