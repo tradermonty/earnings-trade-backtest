@@ -1,3 +1,6 @@
+# Reviews (internal code review results)
+reviews/
+
 # Python
 __pycache__/
 *.py[cod]
