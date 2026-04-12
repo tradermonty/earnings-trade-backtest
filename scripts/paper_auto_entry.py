@@ -230,11 +230,17 @@ def execute_pending(dry_run: bool = False):
             result = mgr.submit_market_order(
                 ex['symbol'], ex['shares'], side='sell', client_order_id=cid
             )
-            is_dup = result.get('status') == 'duplicate'
-            exit_results.append({'exit': ex, 'result': result, 'success': not is_dup})
-            if is_dup:
-                print(f"  SKIP {ex['symbol']}: duplicate order (already submitted)")
+            if result.get('status') == 'duplicate':
+                # Reconcile: look up original order to see if it filled
+                existing = mgr.get_order_by_client_id(cid)
+                if existing and existing.get('status') == 'filled':
+                    exit_results.append({'exit': ex, 'result': existing, 'success': True})
+                    print(f"  RECONCILED {ex['symbol']}: prior order filled")
+                else:
+                    exit_results.append({'exit': ex, 'result': result, 'success': False})
+                    print(f"  SKIP {ex['symbol']}: duplicate, prior order status={existing.get('status') if existing else 'unknown'}")
             else:
+                exit_results.append({'exit': ex, 'result': result, 'success': True})
                 print(f"  SOLD {ex['symbol']} {ex['shares']} shares ({ex['reason']})")
         except Exception as e:
             exit_results.append({'exit': ex, 'result': str(e), 'success': False})
@@ -337,12 +343,20 @@ def execute_pending(dry_run: bool = False):
             result = mgr.submit_market_order(
                 en['symbol'], shares, side='buy', client_order_id=cid
             )
-            is_dup = result.get('status') == 'duplicate'
-            entry_results.append({'entry': en, 'result': result,
-                                  'success': not is_dup, 'shares': shares})
-            if is_dup:
-                print(f"  SKIP {en['symbol']}: duplicate order (already submitted)")
+            if result.get('status') == 'duplicate':
+                existing = mgr.get_order_by_client_id(cid)
+                if existing and existing.get('status') == 'filled':
+                    entry_results.append({'entry': en, 'result': existing,
+                                          'success': True, 'shares': shares})
+                    margin_room -= estimated_value
+                    print(f"  RECONCILED {en['symbol']}: prior order filled")
+                else:
+                    entry_results.append({'entry': en, 'result': result,
+                                          'success': False, 'shares': shares})
+                    print(f"  SKIP {en['symbol']}: duplicate, status={existing.get('status') if existing else 'unknown'}")
             else:
+                entry_results.append({'entry': en, 'result': result,
+                                      'success': True, 'shares': shares})
                 margin_room -= estimated_value
                 print(f"  BOUGHT {en['symbol']} {shares} shares "
                       f"(est ${en['prev_close']:.2f})")

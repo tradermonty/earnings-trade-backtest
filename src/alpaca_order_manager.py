@@ -137,6 +137,14 @@ class AlpacaOrderManager:
         orders = self.api.list_orders(status='open')
         return [self._order_to_dict(o) for o in orders]
 
+    def get_order_by_client_id(self, client_order_id: str) -> Optional[Dict[str, Any]]:
+        """Look up an existing order by client_order_id for reconciliation."""
+        try:
+            order = self.api.get_order_by_client_order_id(client_order_id)
+            return self._order_to_dict(order)
+        except tradeapi.rest.APIError:
+            return None
+
     def cancel_order(self, order_id: str) -> bool:
         """Cancel an order by ID. Returns True if cancelled."""
         try:

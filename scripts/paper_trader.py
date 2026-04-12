@@ -25,6 +25,8 @@ from src.alpaca_order_manager import AlpacaOrderManager
 
 DATA_DIR = os.path.join(project_root, 'data')
 TRADES_FILE = os.path.join(DATA_DIR, 'paper_trades.json')
+PENDING_ENTRIES_FILE = os.path.join(DATA_DIR, 'pending_entries.json')
+PENDING_EXITS_FILE = os.path.join(DATA_DIR, 'pending_exits.json')
 LOCK_FILE = os.path.join(DATA_DIR, '.paper_state.lock')
 
 
@@ -133,6 +135,16 @@ def cmd_close(args):
                 break
 
         save_json_atomic(TRADES_FILE, trades)
+
+        # Clean pending files to prevent stale re-execution
+        for pf in [PENDING_ENTRIES_FILE, PENDING_EXITS_FILE]:
+            if os.path.exists(pf):
+                with open(pf) as f:
+                    pending = json.load(f)
+                cleaned = [p for p in pending if p.get('symbol') != symbol]
+                if len(cleaned) < len(pending):
+                    save_json_atomic(pf, cleaned)
+                    print(f"Removed {symbol} from {os.path.basename(pf)}")
 
 
 def main():
