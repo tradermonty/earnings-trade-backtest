@@ -482,8 +482,8 @@ def execute_pending(dry_run: bool = False):
     ok_exits = sum(1 for r in exit_results if r['success'])
     ok_entries = sum(1 for r in entry_results if r['success'])
     print(f"\n=== Summary ===")
-    print(f"Exits: {ok_exits}/{len(pending_exits)} successful")
-    print(f"Entries: {ok_entries}/{len(entry_plan)} successful")
+    print(f"Exits: {ok_exits}/{len(exit_results)} successful")
+    print(f"Entries: {ok_entries}/{len(entry_results)} successful")
 
 
 def main():
