@@ -351,6 +351,7 @@ class DataFilter:
                     'code': symbol,
                     'report_date': earning['report_date'],
                     'trade_date': trade_date,
+                    'before_after_market': earning.get('before_after_market'),
                     'price': trade_date_data['Open'],
                     'entry_price': trade_date_data['Open'],
                     'prev_close': prev_day_data['Close'],

@@ -71,6 +71,11 @@ def parse_arguments():
                         help='Minimum market cap in billions')
     # Volume filtering is hardcoded at 200K in DataFilter._check_final_conditions()
 
+    # Market timing filter (for paper trading BMO/AMC split)
+    parser.add_argument('--market_timing', type=str, default=None,
+                        choices=['bmo', 'amc'],
+                        help='Filter by market timing: bmo (before market open) or amc (after market close)')
+
     # Output options
     parser.add_argument('--output_dir', type=str,
                         default='./reports/screener',
@@ -201,10 +206,21 @@ def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
 
     print(f"Universe: {len(target_symbols)} symbols from FMP screener")
 
-    # 2. Fetch earnings (prev business day + target date)
-    earnings_data, prev_bday = _fetch_earnings_for_date(
-        data_fetcher, date_str, target_symbols,
-    )
+    # 2. Fetch earnings
+    # AMC mode only needs today's data (AMC from today → trade tomorrow)
+    # BMO/default needs prev bday + today (prev AMC → trade today, today BMO → trade today)
+    market_timing_arg = getattr(args, 'market_timing', None)
+    if market_timing_arg == 'amc':
+        earnings_data = data_fetcher.get_earnings_data(
+            start_date=date_str,
+            end_date=date_str,
+            target_symbols=list(target_symbols),
+        )
+        prev_bday = date_str
+    else:
+        earnings_data, prev_bday = _fetch_earnings_for_date(
+            data_fetcher, date_str, target_symbols,
+        )
 
     if not earnings_data:
         print(f"No earnings data found for {prev_bday} to {date_str}")
@@ -236,10 +252,32 @@ def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
 
     filtered_candidates = data_filter.filter_earnings_data(earnings_data)
 
-    # Remove stale candidates from the expanded date window
-    filtered_candidates = [
-        c for c in filtered_candidates if c.get('trade_date') == date_str
-    ]
+    # Remove stale candidates from the expanded date window.
+    # market_timing mode changes which trade_date we keep:
+    #   bmo: trade_date == date_str (BMO reported today, trade today)
+    #   amc: trade_date == next_bday (AMC reported today, trade tomorrow)
+    #   None: trade_date == date_str (backward-compatible default)
+    market_timing = getattr(args, 'market_timing', None)
+
+    if market_timing == 'amc':
+        next_bday = (
+            pd.Timestamp(date_str) + pd.offsets.BDay(1)
+        ).strftime('%Y-%m-%d')
+        filtered_candidates = [
+            c for c in filtered_candidates
+            if c.get('trade_date') == next_bday
+            and c.get('before_after_market') != 'BeforeMarket'
+        ]
+    elif market_timing == 'bmo':
+        filtered_candidates = [
+            c for c in filtered_candidates
+            if c.get('trade_date') == date_str
+            and c.get('before_after_market') == 'BeforeMarket'
+        ]
+    else:
+        filtered_candidates = [
+            c for c in filtered_candidates if c.get('trade_date') == date_str
+        ]
 
     print(f"After filtering: {len(filtered_candidates)} candidates")
 
