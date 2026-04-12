@@ -197,4 +197,5 @@ temp/
 *.tmp
 *.bak
 *.swp
-*~
+*~logs/paper_dryrun/
+data/
