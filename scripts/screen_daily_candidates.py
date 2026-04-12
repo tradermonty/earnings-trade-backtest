@@ -183,6 +183,77 @@ def _build_scored_candidates(filtered_candidates, date_str):
     return candidates
 
 
+def _filter_amc_candidates(
+    earnings_data, data_fetcher, target_symbols, args, date_str,
+) -> List[Dict[str, Any]]:
+    """AMC-only filter: first-stage only (no trade_date price data needed).
+
+    Tomorrow's bars don't exist yet at 16:00, so we skip DataFilter's
+    second stage and return candidates based on EPS surprise alone.
+    Price/gap/volume will be verified at entry time (9:30 next morning).
+    """
+    next_bday = (pd.Timestamp(date_str) + pd.offsets.BDay(1)).strftime('%Y-%m-%d')
+    candidates = []
+
+    for earning in earnings_data.get('earnings', []):
+        code = earning.get('code', '')
+        if not code.endswith('.US'):
+            continue
+        symbol = code[:-3]
+
+        if target_symbols and symbol not in target_symbols:
+            continue
+
+        # EPS surprise filter
+        try:
+            percent = float(earning.get('percent', 0))
+            actual = earning.get('actual')
+            if actual is not None:
+                actual = float(actual)
+        except (ValueError, TypeError):
+            continue
+
+        if actual is not None and percent < args.min_surprise:
+            continue
+        if actual is not None and actual <= 0:
+            continue
+
+        # AMC only (not BMO)
+        timing = earning.get('before_after_market', '')
+        if timing == 'BeforeMarket':
+            continue
+
+        # Use today's close as prev_close estimate (fetch from FMP)
+        hist = data_fetcher.get_historical_data(
+            symbol,
+            (pd.Timestamp(date_str) - pd.Timedelta(days=5)).strftime('%Y-%m-%d'),
+            date_str,
+        )
+        prev_close = 0
+        if hist is not None and not hist.empty:
+            close_col = 'Close' if 'Close' in hist.columns else 'close'
+            prev_close = float(hist.iloc[-1][close_col])
+
+        # Price filter
+        if prev_close < args.min_price:
+            continue
+
+        candidates.append({
+            'code': symbol,
+            'report_date': earning.get('report_date', date_str),
+            'trade_date': next_bday,
+            'before_after_market': timing,
+            'prev_close': prev_close,
+            'entry_price': prev_close,  # estimate; actual at 9:30
+            'gap': 0,  # unknown until tomorrow
+            'percent': percent,
+            'pre_change': 0,
+            'avg_volume': 0,
+        })
+
+    return candidates
+
+
 def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
     """Screen for entry candidates on given date.
 
@@ -230,54 +301,49 @@ def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
     print(f"Found {earnings_count} earnings reports ({prev_bday} to {date_str})")
 
     # 3. Filter candidates
-    config = BacktestConfig(
-        start_date=prev_bday,
-        end_date=date_str,
-        min_surprise_percent=args.min_surprise,
-        max_gap_percent=args.max_gap,
-        screener_price_min=args.min_price,
-        min_market_cap=args.min_market_cap * 1e9,
-    )
-
-    data_filter = DataFilter(
-        data_fetcher=data_fetcher,
-        target_symbols=target_symbols,
-        min_surprise_percent=config.min_surprise_percent,
-        pre_earnings_change=config.pre_earnings_change,
-        max_holding_days=config.max_holding_days,
-        max_gap_percent=config.max_gap_percent,
-        screener_price_min=args.min_price,
-        min_market_cap=args.min_market_cap * 1e9,
-    )
-
-    filtered_candidates = data_filter.filter_earnings_data(earnings_data)
-
-    # Remove stale candidates from the expanded date window.
-    # market_timing mode changes which trade_date we keep:
-    #   bmo: trade_date == date_str (BMO reported today, trade today)
-    #   amc: trade_date == next_bday (AMC reported today, trade tomorrow)
-    #   None: trade_date == date_str (backward-compatible default)
-    market_timing = getattr(args, 'market_timing', None)
-
-    if market_timing == 'amc':
-        next_bday = (
-            pd.Timestamp(date_str) + pd.offsets.BDay(1)
-        ).strftime('%Y-%m-%d')
-        filtered_candidates = [
-            c for c in filtered_candidates
-            if c.get('trade_date') == next_bday
-            and c.get('before_after_market') != 'BeforeMarket'
-        ]
-    elif market_timing == 'bmo':
-        filtered_candidates = [
-            c for c in filtered_candidates
-            if c.get('trade_date') == date_str
-            and c.get('before_after_market') == 'BeforeMarket'
-        ]
+    if market_timing_arg == 'amc':
+        # AMC mode: tomorrow's bars don't exist yet, so skip DataFilter's
+        # second stage (which fetches trade_date price data).
+        # Use first-stage filter only (EPS surprise + positive EPS).
+        filtered_candidates = _filter_amc_candidates(
+            earnings_data, data_fetcher, target_symbols, args, date_str,
+        )
     else:
-        filtered_candidates = [
-            c for c in filtered_candidates if c.get('trade_date') == date_str
-        ]
+        config = BacktestConfig(
+            start_date=prev_bday,
+            end_date=date_str,
+            min_surprise_percent=args.min_surprise,
+            max_gap_percent=args.max_gap,
+            screener_price_min=args.min_price,
+            min_market_cap=args.min_market_cap * 1e9,
+        )
+
+        data_filter = DataFilter(
+            data_fetcher=data_fetcher,
+            target_symbols=target_symbols,
+            min_surprise_percent=config.min_surprise_percent,
+            pre_earnings_change=config.pre_earnings_change,
+            max_holding_days=config.max_holding_days,
+            max_gap_percent=config.max_gap_percent,
+            screener_price_min=args.min_price,
+            min_market_cap=args.min_market_cap * 1e9,
+        )
+
+        filtered_candidates = data_filter.filter_earnings_data(earnings_data)
+
+        # Remove stale candidates from the expanded date window.
+        market_timing = getattr(args, 'market_timing', None)
+        if market_timing == 'bmo':
+            filtered_candidates = [
+                c for c in filtered_candidates
+                if c.get('trade_date') == date_str
+                and c.get('before_after_market') == 'BeforeMarket'
+            ]
+        else:
+            filtered_candidates = [
+                c for c in filtered_candidates
+                if c.get('trade_date') == date_str
+            ]
 
     print(f"After filtering: {len(filtered_candidates)} candidates")
 

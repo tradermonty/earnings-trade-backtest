@@ -135,6 +135,7 @@ def check_exit_conditions(
         }
 
     # --- Priority 2: Stop loss ---
+    # Intraday stop: checked on entry day and beyond (Low <= stop)
     if today_low <= stop_loss_price:
         return {
             'symbol': symbol,
@@ -145,18 +146,20 @@ def check_exit_conditions(
         }
 
     # --- Priority 3: Trailing stop (Close < MA21) ---
-    ma_col = f'MA{TRAIL_STOP_MA}'
-    if ma_col not in stock_data.columns:
-        stock_data[ma_col] = stock_data['Close'].rolling(TRAIL_STOP_MA).mean()
-    ma_value = stock_data.loc[today].get(ma_col) if today in stock_data.index else None
-    if ma_value is not None and pd.notna(ma_value) and today_close < ma_value:
-        return {
-            'symbol': symbol,
-            'shares': remaining_shares,
-            'reason': 'trailing_stop',
-            'trigger_date': today,
-            'trigger_price': ma_value,
-        }
+    # Only from day 2 onward (trade_executor checks entry_idx + 1)
+    if days_held > 0:
+        ma_col = f'MA{TRAIL_STOP_MA}'
+        if ma_col not in stock_data.columns:
+            stock_data[ma_col] = stock_data['Close'].rolling(TRAIL_STOP_MA).mean()
+        ma_value = stock_data.loc[today].get(ma_col) if today in stock_data.index else None
+        if ma_value is not None and pd.notna(ma_value) and today_close < ma_value:
+            return {
+                'symbol': symbol,
+                'shares': remaining_shares,
+                'reason': 'trailing_stop',
+                'trigger_date': today,
+                'trigger_price': ma_value,
+            }
 
     # --- Priority 4: Partial profit (day 1 only, +6%) ---
     if days_held == 0:
@@ -221,10 +224,15 @@ def run_exit_monitor(dry_run: bool = False):
         print("(dry-run mode — not saving to pending_exits.json)")
         return
 
-    # Save to pending_exits.json
+    # Save to pending_exits.json (re-read under lock to avoid race)
     with lock:
         existing_exits = load_json(PENDING_EXITS_FILE)
-        existing_exits.extend(new_exits)
+        existing_symbols = {e['symbol'] for e in existing_exits}
+        deduped = [e for e in new_exits if e['symbol'] not in existing_symbols]
+        if len(deduped) < len(new_exits):
+            skipped = len(new_exits) - len(deduped)
+            print(f"  Deduplicated: {skipped} exits already pending")
+        existing_exits.extend(deduped)
         save_json_atomic(PENDING_EXITS_FILE, existing_exits)
 
     print(f"Saved {len(new_exits)} exits to pending_exits.json")
