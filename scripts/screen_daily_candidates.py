@@ -286,10 +286,9 @@ def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
     print(f"Universe: {len(target_symbols)} symbols from FMP screener")
 
     # 2. Fetch earnings
-    # AMC mode only needs today's data (AMC from today → trade tomorrow)
-    # BMO/default needs prev bday + today (prev AMC → trade today, today BMO → trade today)
     market_timing_arg = getattr(args, 'market_timing', None)
-    if market_timing_arg == 'amc':
+    if market_timing_arg in ('amc', 'bmo'):
+        # Live mode: fetch only today's earnings (lightweight filter skips second stage)
         earnings_data = data_fetcher.get_earnings_data(
             start_date=date_str,
             end_date=date_str,
@@ -297,6 +296,7 @@ def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
         )
         prev_bday = date_str
     else:
+        # Default/backtest: fetch prev bday + today for AMC→today trade coverage
         earnings_data, prev_bday = _fetch_earnings_for_date(
             data_fetcher, date_str, target_symbols,
         )

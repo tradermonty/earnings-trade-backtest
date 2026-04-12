@@ -268,47 +268,55 @@ def execute_pending(dry_run: bool = False):
 
     verified_plan = []
     for en in entry_plan:
-        if en.get('timing') == 'amc':
+        if en.get('timing') in ('amc', 'bmo'):
             sym = en['symbol']
-            # Fetch today's data to check open price and gap
+            # Verify gap/price/volume using today's actual bar
             hist = df_for_verify.get_historical_data(
                 sym,
-                (pd.Timestamp(today) - pd.Timedelta(days=5)).strftime('%Y-%m-%d'),
+                (pd.Timestamp(today) - pd.Timedelta(days=30)).strftime('%Y-%m-%d'),
                 today,
             )
-            if hist is not None and not hist.empty:
-                close_col = 'Close' if 'Close' in hist.columns else 'close'
-                open_col = 'Open' if 'Open' in hist.columns else 'open'
-                vol_col = 'Volume' if 'Volume' in hist.columns else 'volume'
-
-                today_open = float(hist.iloc[-1][open_col]) if today in hist['date'].values or len(hist) > 0 else 0
-                prev_close = float(hist.iloc[-2][close_col]) if len(hist) >= 2 else en['prev_close']
-                avg_volume = float(hist[vol_col].tail(20).mean()) if len(hist) >= 2 else 0
-
-                gap = (today_open - prev_close) / prev_close * 100 if prev_close > 0 else 0
-
-                # Apply same filters as DataFilter._check_final_conditions
-                if gap < 0:
-                    print(f"  SKIP {sym}: negative gap ({gap:.1f}%)")
-                    continue
-                if gap > 10.0:
-                    print(f"  SKIP {sym}: gap too large ({gap:.1f}%)")
-                    continue
-                if today_open < 30.0:
-                    print(f"  SKIP {sym}: price ${today_open:.2f} < $30")
-                    continue
-                if avg_volume < 200000:
-                    print(f"  SKIP {sym}: volume {avg_volume:.0f} < 200K")
-                    continue
-
-                # Update with actual prices
-                en['prev_close'] = prev_close
-                en['entry_price_est'] = today_open
-                en['gap_percent'] = gap
-                print(f"  VERIFIED {sym}: gap={gap:.1f}%, open=${today_open:.2f}")
-            else:
+            if hist is None or hist.empty:
                 print(f"  SKIP {sym}: no price data available")
                 continue
+
+            date_col = 'date'
+            close_col = 'Close' if 'Close' in hist.columns else 'close'
+            open_col = 'Open' if 'Open' in hist.columns else 'open'
+            vol_col = 'Volume' if 'Volume' in hist.columns else 'volume'
+
+            # Check if today's bar actually exists
+            today_rows = hist[hist[date_col] == today]
+            if today_rows.empty:
+                print(f"  SKIP {sym}: today's bar not yet available")
+                continue
+
+            today_open = float(today_rows.iloc[0][open_col])
+            # prev_close = most recent close BEFORE today
+            prev_rows = hist[hist[date_col] < today]
+            prev_close = float(prev_rows.iloc[-1][close_col]) if not prev_rows.empty else en['prev_close']
+            avg_volume = float(hist[vol_col].tail(20).mean())
+
+            gap = (today_open - prev_close) / prev_close * 100 if prev_close > 0 else 0
+
+            if gap < 0:
+                print(f"  SKIP {sym}: negative gap ({gap:.1f}%)")
+                continue
+            if gap > 10.0:
+                print(f"  SKIP {sym}: gap too large ({gap:.1f}%)")
+                continue
+            if today_open < 30.0:
+                print(f"  SKIP {sym}: price ${today_open:.2f} < $30")
+                continue
+            if avg_volume < 200000:
+                print(f"  SKIP {sym}: volume {avg_volume:.0f} < 200K")
+                continue
+
+            en['prev_close'] = prev_close
+            en['entry_price_est'] = today_open
+            en['gap_percent'] = gap
+            print(f"  VERIFIED {sym}: gap={gap:.1f}%, open=${today_open:.2f}")
+
         verified_plan.append(en)
 
     entry_plan = verified_plan

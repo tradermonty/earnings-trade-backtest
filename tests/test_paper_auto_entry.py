@@ -116,7 +116,7 @@ class TestExecutePending:
         mod = patch_paths
 
         with open(mod.PENDING_ENTRIES_FILE, 'w') as f:
-            json.dump([{'symbol': 'TEST', 'timing': 'bmo', 'date': '2026-03-03',
+            json.dump([{'symbol': 'TEST', 'timing': None, 'date': '2026-03-03',
                         'prev_close': 50.0, 'score': 70}], f)
 
         mock_mgr = Mock()
@@ -143,8 +143,9 @@ class TestExecutePending:
         """Successful market order should create a trade record."""
         mod = patch_paths
 
+        # timing=None to skip live re-verification (which needs real price data)
         with open(mod.PENDING_ENTRIES_FILE, 'w') as f:
-            json.dump([{'symbol': 'AAPL', 'timing': 'bmo', 'date': '2026-03-03',
+            json.dump([{'symbol': 'AAPL', 'timing': None, 'date': '2026-03-03',
                         'prev_close': 150.0, 'score': 70,
                         'entry_price_est': 155.0, 'gap_percent': 3.3,
                         'eps_surprise': 10.0}], f)
@@ -179,7 +180,7 @@ class TestExecutePending:
         mod = patch_paths
 
         with open(mod.PENDING_ENTRIES_FILE, 'w') as f:
-            json.dump([{'symbol': 'TEST', 'timing': 'bmo', 'date': '2026-03-03',
+            json.dump([{'symbol': 'TEST', 'timing': None, 'date': '2026-03-03',
                         'prev_close': 50.0, 'score': 70}], f)
 
         mock_mgr = Mock()
@@ -207,7 +208,7 @@ class TestExecutePending:
         mod = patch_paths
 
         with open(mod.PENDING_ENTRIES_FILE, 'w') as f:
-            json.dump([{'symbol': 'FAIL', 'timing': 'bmo', 'date': '2026-03-03',
+            json.dump([{'symbol': 'FAIL', 'timing': None, 'date': '2026-03-03',
                         'prev_close': 50.0, 'score': 70}], f)
 
         mock_mgr = Mock()
