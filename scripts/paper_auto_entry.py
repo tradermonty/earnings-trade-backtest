@@ -26,6 +26,8 @@ import tempfile
 from datetime import datetime
 from typing import Dict, List, Any
 
+import pandas as pd
+
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.join(project_root, 'src'))
@@ -228,8 +230,12 @@ def execute_pending(dry_run: bool = False):
             result = mgr.submit_market_order(
                 ex['symbol'], ex['shares'], side='sell', client_order_id=cid
             )
-            exit_results.append({'exit': ex, 'result': result, 'success': True})
-            print(f"  SOLD {ex['symbol']} {ex['shares']} shares ({ex['reason']})")
+            is_dup = result.get('status') == 'duplicate'
+            exit_results.append({'exit': ex, 'result': result, 'success': not is_dup})
+            if is_dup:
+                print(f"  SKIP {ex['symbol']}: duplicate order (already submitted)")
+            else:
+                print(f"  SOLD {ex['symbol']} {ex['shares']} shares ({ex['reason']})")
         except Exception as e:
             exit_results.append({'exit': ex, 'result': str(e), 'success': False})
             print(f"  FAILED sell {ex['symbol']}: {e}")
@@ -247,6 +253,60 @@ def execute_pending(dry_run: bool = False):
     positions = mgr.get_positions()
     total_position_value = sum(p['market_value'] for p in positions)
     margin_room = portfolio_value * MARGIN_RATIO - total_position_value
+
+    # Re-verify AMC candidates at entry time (gap/volume/price)
+    # AMC candidates were screened without trade-date bars;
+    # now that market is open we can check pre-open/open conditions.
+    from src.data_fetcher import DataFetcher as DF
+    df_for_verify = DF(use_fmp=True)
+
+    verified_plan = []
+    for en in entry_plan:
+        if en.get('timing') == 'amc':
+            sym = en['symbol']
+            # Fetch today's data to check open price and gap
+            hist = df_for_verify.get_historical_data(
+                sym,
+                (pd.Timestamp(today) - pd.Timedelta(days=5)).strftime('%Y-%m-%d'),
+                today,
+            )
+            if hist is not None and not hist.empty:
+                close_col = 'Close' if 'Close' in hist.columns else 'close'
+                open_col = 'Open' if 'Open' in hist.columns else 'open'
+                vol_col = 'Volume' if 'Volume' in hist.columns else 'volume'
+
+                today_open = float(hist.iloc[-1][open_col]) if today in hist['date'].values or len(hist) > 0 else 0
+                prev_close = float(hist.iloc[-2][close_col]) if len(hist) >= 2 else en['prev_close']
+                avg_volume = float(hist[vol_col].tail(20).mean()) if len(hist) >= 2 else 0
+
+                gap = (today_open - prev_close) / prev_close * 100 if prev_close > 0 else 0
+
+                # Apply same filters as DataFilter._check_final_conditions
+                if gap < 0:
+                    print(f"  SKIP {sym}: negative gap ({gap:.1f}%)")
+                    continue
+                if gap > 10.0:
+                    print(f"  SKIP {sym}: gap too large ({gap:.1f}%)")
+                    continue
+                if today_open < 30.0:
+                    print(f"  SKIP {sym}: price ${today_open:.2f} < $30")
+                    continue
+                if avg_volume < 200000:
+                    print(f"  SKIP {sym}: volume {avg_volume:.0f} < 200K")
+                    continue
+
+                # Update with actual prices
+                en['prev_close'] = prev_close
+                en['entry_price_est'] = today_open
+                en['gap_percent'] = gap
+                print(f"  VERIFIED {sym}: gap={gap:.1f}%, open=${today_open:.2f}")
+            else:
+                print(f"  SKIP {sym}: no price data available")
+                continue
+        verified_plan.append(en)
+
+    entry_plan = verified_plan
+    print(f"After AMC re-verification: {len(entry_plan)} entries")
 
     entry_results = []
     for en in entry_plan:
@@ -277,11 +337,15 @@ def execute_pending(dry_run: bool = False):
             result = mgr.submit_market_order(
                 en['symbol'], shares, side='buy', client_order_id=cid
             )
-            entry_results.append({'entry': en, 'result': result, 'success': True,
-                                  'shares': shares})
-            margin_room -= estimated_value
-            print(f"  BOUGHT {en['symbol']} {shares} shares "
-                  f"(est ${en['prev_close']:.2f})")
+            is_dup = result.get('status') == 'duplicate'
+            entry_results.append({'entry': en, 'result': result,
+                                  'success': not is_dup, 'shares': shares})
+            if is_dup:
+                print(f"  SKIP {en['symbol']}: duplicate order (already submitted)")
+            else:
+                margin_room -= estimated_value
+                print(f"  BOUGHT {en['symbol']} {shares} shares "
+                      f"(est ${en['prev_close']:.2f})")
         except Exception as e:
             entry_results.append({'entry': en, 'result': str(e), 'success': False})
             print(f"  FAILED buy {en['symbol']}: {e}")

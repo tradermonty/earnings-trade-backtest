@@ -13,15 +13,34 @@ import argparse
 import json
 import os
 import sys
+import tempfile
+from datetime import datetime
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.join(project_root, 'src'))
 
+from filelock import FileLock
 from src.alpaca_order_manager import AlpacaOrderManager
 
 DATA_DIR = os.path.join(project_root, 'data')
 TRADES_FILE = os.path.join(DATA_DIR, 'paper_trades.json')
+LOCK_FILE = os.path.join(DATA_DIR, '.paper_state.lock')
+
+
+def save_json_atomic(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.rename(tmp, path)
+    except Exception:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
 
 
 def cmd_status(args):
@@ -72,6 +91,7 @@ def cmd_close(args):
     mgr = AlpacaOrderManager(account_type='paper')
     symbol = args.symbol.upper()
     qty = args.qty
+    today = datetime.now().strftime('%Y-%m-%d')
 
     if qty:
         print(f"Closing {qty} shares of {symbol}...")
@@ -81,6 +101,38 @@ def cmd_close(args):
         result = mgr.close_position(symbol)
 
     print(f"Order: {result}")
+
+    # Update paper_trades.json to reflect the close
+    lock = FileLock(LOCK_FILE, timeout=30)
+    with lock:
+        if os.path.exists(TRADES_FILE):
+            with open(TRADES_FILE) as f:
+                trades = json.load(f)
+        else:
+            trades = []
+
+        for t in trades:
+            if t['symbol'] == symbol and t['status'] == 'open':
+                close_qty = qty or t['remaining_shares']
+                fill_price = result.get('filled_avg_price') or 0
+                pnl = (fill_price - t['entry_price']) * close_qty if fill_price else 0
+                t['legs'].append({
+                    'date': today,
+                    'action': 'exit_manual',
+                    'shares': close_qty,
+                    'price': fill_price,
+                    'pnl': round(pnl, 2),
+                    'reason': 'manual_close',
+                    'order_id': result.get('id', ''),
+                })
+                t['remaining_shares'] -= close_qty
+                if t['remaining_shares'] <= 0:
+                    t['status'] = 'closed'
+                print(f"Updated paper_trades.json: {symbol} → "
+                      f"remaining={t['remaining_shares']}, status={t['status']}")
+                break
+
+        save_json_atomic(TRADES_FILE, trades)
 
 
 def main():
