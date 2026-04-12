@@ -174,10 +174,22 @@ def screen_and_save(timing: str, dry_run: bool = False):
     lock = FileLock(LOCK_FILE, timeout=30)
     with lock:
         existing = load_json(PENDING_ENTRIES_FILE)
-        existing.extend(entries)
+        # Dedupe by (symbol, date, timing) to handle re-runs
+        existing_keys = {
+            (e['symbol'], e['date'], e.get('timing'))
+            for e in existing
+        }
+        new_entries = [
+            e for e in entries
+            if (e['symbol'], e['date'], e.get('timing')) not in existing_keys
+        ]
+        skipped = len(entries) - len(new_entries)
+        existing.extend(new_entries)
         save_json_atomic(PENDING_ENTRIES_FILE, existing)
 
-    print(f"\nSaved {len(entries)} entries to pending_entries.json")
+    if skipped > 0:
+        print(f"\n  Deduplicated: {skipped} entries already pending")
+    print(f"Saved {len(new_entries)} new entries to pending_entries.json")
 
 
 # --- Execute Mode ---
@@ -268,7 +280,7 @@ def execute_pending(dry_run: bool = False):
 
     verified_plan = []
     for en in entry_plan:
-        if en.get('timing') in ('amc', 'bmo'):
+        if en.get('timing') in ('amc', 'bmo'):  # both need live re-verification
             sym = en['symbol']
             # Verify gap/price/volume using today's actual bar
             hist = df_for_verify.get_historical_data(
