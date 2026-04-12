@@ -87,29 +87,52 @@ class TestCheckRiskGate:
 class TestExecutePending:
 
     def test_exits_before_entries(self, patch_paths):
-        """Exits execute before entries, and exit symbols are excluded from entries."""
+        """Exit symbols are excluded from entry plan."""
         mod = patch_paths
 
-        # Setup: 1 pending exit, 1 pending entry (same symbol)
+        # Setup: pending exit AND pending entry for same symbol
         with open(mod.PENDING_EXITS_FILE, 'w') as f:
             json.dump([{'symbol': 'VSNT', 'shares': 45, 'reason': 'stop_loss'}], f)
         with open(mod.PENDING_ENTRIES_FILE, 'w') as f:
-            json.dump([{'symbol': 'VSNT', 'timing': 'amc', 'date': '2026-03-03',
-                        'prev_close': 33.0, 'score': 85}], f)
+            json.dump([
+                {'symbol': 'VSNT', 'timing': None, 'date': '2026-03-03',
+                 'prev_close': 33.0, 'score': 85},
+                {'symbol': 'AAPL', 'timing': None, 'date': '2026-03-03',
+                 'prev_close': 150.0, 'score': 70},
+            ], f)
+        # Also need an open trade for VSNT so the exit has something to close
+        with open(mod.TRADES_FILE, 'w') as f:
+            json.dump([{
+                'symbol': 'VSNT', 'entry_date': '2026-03-01', 'entry_price': 30.0,
+                'initial_shares': 45, 'remaining_shares': 45,
+                'stop_loss_price': 27.0, 'status': 'open', 'legs': [],
+            }], f)
 
-        # Mock AlpacaOrderManager
         mock_mgr = Mock()
         mock_mgr.get_positions.return_value = []
         mock_mgr.get_account_summary.return_value = {
             'portfolio_value': 100000, 'buying_power': 100000,
         }
+        mock_mgr.submit_market_order.return_value = {
+            'id': 'o1', 'status': 'filled', 'filled_avg_price': 28.0,
+            'client_order_id': 'test',
+        }
 
-        with patch.object(mod, 'AlpacaOrderManager', return_value=mock_mgr):
+        with patch.object(mod, 'AlpacaOrderManager', return_value=mock_mgr) as MockCls:
+            MockCls.calculate_position_size = AlpacaOrderManager.calculate_position_size
+            MockCls.make_client_order_id = AlpacaOrderManager.make_client_order_id
             with patch.object(mod, 'get_today_str', return_value='2026-03-04'):
-                mod.execute_pending(dry_run=True)
+                mod.execute_pending(dry_run=False)
 
-        # In dry-run, no orders placed — but the logic should show
-        # VSNT entry is excluded because it's also in exits
+        # VSNT should be sold (exit) but NOT bought (excluded from entries)
+        # AAPL should be bought (not in exit symbols)
+        calls = mock_mgr.submit_market_order.call_args_list
+        sell_symbols = [c.kwargs.get('symbol') or c[0][0] for c in calls if (c.kwargs.get('side') or c[1].get('side', c[0][1] if len(c[0]) > 1 else '')) == 'sell']
+        buy_symbols = [c.kwargs.get('symbol') or c[0][0] for c in calls if (c.kwargs.get('side') or c[1].get('side', c[0][1] if len(c[0]) > 1 else '')) == 'buy']
+
+        assert 'VSNT' in sell_symbols, "VSNT should be sold (exit)"
+        assert 'VSNT' not in buy_symbols, "VSNT should NOT be re-bought (excluded)"
+        assert 'AAPL' in buy_symbols, "AAPL should be bought"
 
     def test_duplicate_order_not_recorded(self, patch_paths):
         """Duplicate orders should not update paper_trades.json."""

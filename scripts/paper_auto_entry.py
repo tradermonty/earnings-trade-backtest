@@ -43,12 +43,12 @@ PENDING_ENTRIES_FILE = os.path.join(DATA_DIR, 'pending_entries.json')
 PENDING_EXITS_FILE = os.path.join(DATA_DIR, 'pending_exits.json')
 LOCK_FILE = os.path.join(DATA_DIR, '.paper_state.lock')
 
-# Strategy parameters
-POSITION_SIZE_PCT = 15.0
-SLIPPAGE_PCT = 0.3
-STOP_LOSS_PCT = 10.0
-MARGIN_RATIO = 1.5
-RISK_LIMIT_PCT = 6.0
+# Strategy parameters — must match BacktestConfig defaults (src/config.py)
+POSITION_SIZE_PCT = 10.0   # config.py:14 position_size = 10
+SLIPPAGE_PCT = 1.0         # config.py:15 slippage = 1.0
+STOP_LOSS_PCT = 10.0       # config.py:10 stop_loss = 10
+MARGIN_RATIO = 1.5         # config.py:22 margin_ratio = 1.5
+RISK_LIMIT_PCT = 6.0       # config.py:16 risk_limit = 6
 
 
 def load_json(path):
@@ -279,6 +279,7 @@ def execute_pending(dry_run: bool = False):
     df_for_verify = DF(use_fmp=True)
 
     verified_plan = []
+    skipped_entries = []  # Track skipped candidates for pending cleanup
     for en in entry_plan:
         if en.get('timing') in ('amc', 'bmo'):  # both need live re-verification
             sym = en['symbol']
@@ -290,6 +291,7 @@ def execute_pending(dry_run: bool = False):
             )
             if hist is None or hist.empty:
                 print(f"  SKIP {sym}: no price data available")
+                skipped_entries.append(en)
                 continue
 
             date_col = 'date'
@@ -301,6 +303,7 @@ def execute_pending(dry_run: bool = False):
             today_rows = hist[hist[date_col] == today]
             if today_rows.empty:
                 print(f"  SKIP {sym}: today's bar not yet available")
+                skipped_entries.append(en)
                 continue
 
             today_open = float(today_rows.iloc[0][open_col])
@@ -313,15 +316,19 @@ def execute_pending(dry_run: bool = False):
 
             if gap < 0:
                 print(f"  SKIP {sym}: negative gap ({gap:.1f}%)")
+                skipped_entries.append(en)
                 continue
             if gap > 10.0:
                 print(f"  SKIP {sym}: gap too large ({gap:.1f}%)")
+                skipped_entries.append(en)
                 continue
             if today_open < 30.0:
                 print(f"  SKIP {sym}: price ${today_open:.2f} < $30")
+                skipped_entries.append(en)
                 continue
             if avg_volume < 200000:
                 print(f"  SKIP {sym}: volume {avg_volume:.0f} < 200K")
+                skipped_entries.append(en)
                 continue
 
             en['prev_close'] = prev_close
@@ -453,6 +460,19 @@ def execute_pending(dry_run: bool = False):
                     pe for pe in pending_entries
                     if not (pe['symbol'] == en['symbol'] and pe['timing'] == en['timing'])
                 ]
+
+        # Also remove skipped entries (failed re-verification) from pending
+        # to prevent stale candidates from re-executing on the next day
+        skip_keys = {
+            (se['symbol'], se.get('timing'))
+            for se in skipped_entries
+        }
+        if skip_keys:
+            pending_entries = [
+                pe for pe in pending_entries
+                if (pe['symbol'], pe.get('timing')) not in skip_keys
+            ]
+            print(f"  Removed {len(skip_keys)} skipped entries from pending")
 
         save_json_atomic(TRADES_FILE, trades)
         save_json_atomic(PENDING_EXITS_FILE, pending_exits)
