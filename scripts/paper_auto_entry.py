@@ -251,10 +251,21 @@ def check_risk_gate(
 
 # --- Screen Modes ---
 
-def screen_and_save(timing: str, dry_run: bool = False):
-    """Run screener with --market_timing and save to pending_entries.json."""
+def screen_and_save(
+    timing: str,
+    dry_run: bool = False,
+    *,
+    state_dir: Optional[str] = None,
+):
+    """Run screener with --market_timing and save pending entries.
+
+    In dry-run mode candidates are still persisted, but under
+    ``data/dryrun`` (or the injected ``state_dir``) so the cron
+    screen→execute→exit handoff can be replayed without touching live state.
+    """
     today = get_today_str()
     print(f"=== Screen {timing.upper()} candidates ({today}) ===")
+    paths = _resolve_state_paths(state_dir, dry_run)
 
     # Run screener as subprocess
     cmd = [
@@ -294,43 +305,44 @@ def screen_and_save(timing: str, dry_run: bool = False):
     # Build pending entries
     entries = []
     for c in candidates:
+        trade_date = c.get('trade_date') or c.get('date') or today
+        eps_surprise = float(c.get('eps_surprise_percent') or c.get('eps_surprise') or 0)
         entry = {
             'symbol': c['symbol'],
             'timing': timing,
-            'date': today,
+            'date': trade_date,
+            'trade_date': trade_date,
             'prev_close': float(c.get('prev_close', 0)),
-            'entry_price_est': float(c.get('entry_price', 0)),
-            'score': float(c.get('score', 0)),
-            'eps_surprise': float(c.get('eps_surprise_percent', 0)),
+            'entry_price_est': float(c.get('entry_price') or c.get('entry_price_est') or 0),
+            'score': float(c.get('score') or eps_surprise),
+            'eps_surprise': eps_surprise,
+            'eps_surprise_percent': eps_surprise,
             'gap_percent': float(c.get('gap_percent', 0)),
         }
         entries.append(entry)
         print(f"  Candidate: {entry['symbol']} score={entry['score']:.1f} "
               f"gap={entry['gap_percent']:.1f}%")
 
-    if dry_run:
-        print(f"\n(dry-run) Would save {len(entries)} entries to pending_entries.json")
-        return
-
-    lock = FileLock(LOCK_FILE, timeout=30)
+    lock = FileLock(paths.lock, timeout=30)
     with lock:
-        existing = load_json(PENDING_ENTRIES_FILE)
-        # Dedupe by (symbol, date, timing) to handle re-runs
+        existing = load_json(paths.pending_entries)
+        # Dedupe by (symbol, trade_date, timing) to handle re-runs
         existing_keys = {
-            (e['symbol'], e['date'], e.get('timing'))
+            (e['symbol'], e.get('trade_date') or e.get('date'), e.get('timing'))
             for e in existing
         }
         new_entries = [
             e for e in entries
-            if (e['symbol'], e['date'], e.get('timing')) not in existing_keys
+            if (e['symbol'], e.get('trade_date') or e.get('date'), e.get('timing')) not in existing_keys
         ]
         skipped = len(entries) - len(new_entries)
         existing.extend(new_entries)
-        save_json_atomic(PENDING_ENTRIES_FILE, existing)
+        save_json_atomic(paths.pending_entries, existing)
 
     if skipped > 0:
         print(f"\n  Deduplicated: {skipped} entries already pending")
-    print(f"Saved {len(new_entries)} new entries to pending_entries.json")
+    state_label = "dry-run" if dry_run else "live"
+    print(f"Saved {len(new_entries)} new entries to {state_label} pending_entries.json")
 
 
 # --- Execute Mode ---
