@@ -331,3 +331,33 @@ class TestExecutePending:
         assert pending[0]['submission_status'] == 'pending'
         assert pending[0]['submitted_client_order_id']
         assert pending[0]['submitted_shares'] > 0
+
+
+class TestScreenAndSave:
+
+    def test_dry_run_screen_persists_to_dryrun_state_dir(self, tmp_path, tmp_data_dir):
+        """screen dry-run must persist candidates so execute dry-run can consume them."""
+        import scripts.paper_auto_entry as mod
+
+        reports_dir = tmp_path / 'reports' / 'screener'
+        reports_dir.mkdir(parents=True)
+        csv_path = reports_dir / 'daily_candidates_2026-03-03.csv'
+        csv_path.write_text(
+            "symbol,trade_date,prev_close,entry_price,score,eps_surprise_percent,gap_percent\n"
+            "DRY,2026-03-03,49.0,50.0,70,12.5,2.0\n"
+        )
+
+        completed = Mock()
+        completed.returncode = 0
+        completed.stderr = ''
+        with patch.object(mod, 'project_root', str(tmp_path)):
+            with patch.object(mod.subprocess, 'run', return_value=completed):
+                with patch.object(mod, 'get_today_str', return_value='2026-03-03'):
+                    mod.screen_and_save('bmo', dry_run=True, state_dir=tmp_data_dir)
+
+        with open(os.path.join(tmp_data_dir, 'pending_entries.json')) as f:
+            pending = json.load(f)
+        assert len(pending) == 1
+        assert pending[0]['symbol'] == 'DRY'
+        assert pending[0]['trade_date'] == '2026-03-03'
+        assert pending[0]['eps_surprise_percent'] == 12.5
