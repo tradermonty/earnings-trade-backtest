@@ -148,53 +148,71 @@ class TestDailyScreenerDataIntegrity:
         - gap = (pre_open_price - prev_day_data['Close']) / prev_day_data['Close'] * 100
         - entry_price = trade_date_data['Open']
 
-        つまり、gap計算は「前日終値 vs 当日プレオープン/オープン価格」で行われ、
+        Phase 2 fix: pre_earnings_change と avg_volume_20d も filter_utils 経由で
+        trade_date より前のバーだけを参照する。
+
         スクリーナーを西海岸12:00 PM（マーケット引け後）に実行すれば
         確定した価格を使用するため、ルックアヘッドバイアスは発生しない。
         """
-        from scripts.screen_daily_candidates import calculate_candidate_score
+        # Verify: candidate dict shape from _build_scored_candidates carries the
+        # canonical fields used by the backtest-paper parity comparison.
+        from scripts.screen_daily_candidates import _build_scored_candidates
 
-        # Arrange - スクリーン日の前日データを使用
-        # gap_percent は DataFilter で「(当日Open - 前日Close) / 前日Close」として計算済み
-        candidate_data = {
-            'earnings_date': '2024-06-14',  # 決算日
-            'screen_date': '2024-06-15',    # スクリーン日（=トレード日）
-            'prev_close': 150.0,            # 前日終値
-            'gap_percent': 5.0,             # (当日Open - 前日Close) / 前日Close
-            'eps_surprise_percent': 10.0,
-        }
+        items = [{
+            'code': 'TEST',
+            'percent': 10.0,
+            'gap': 5.0,
+            'pre_change': 3.0,
+            'trade_date': '2024-06-15',
+            'prev_close': 150.0,
+        }]
+        result = _build_scored_candidates(items, '2024-06-15')
 
-        # Act
-        score = calculate_candidate_score(candidate_data)
+        assert len(result) == 1
+        c = result[0]
+        # Canonical fields preserved
+        assert c['symbol'] == 'TEST'
+        assert c['eps_surprise_percent'] == 10.0
+        assert c['trade_date'] == '2024-06-15'
+        # Backwards-compat: `date` mirrors `trade_date`, `score` equals surprise %
+        assert c['date'] == c['trade_date']
+        assert c['score'] == c['eps_surprise_percent']
 
-        # Assert
-        assert isinstance(score, (int, float))
-        assert score >= 0
+    def test_candidates_sorted_by_eps_surprise_descending(self):
+        """Phase 3a parity: candidates sort by EPS surprise % descending.
 
-    def test_candidate_score_calculation(self):
-        """候補スコアの計算"""
-        from scripts.screen_daily_candidates import calculate_candidate_score
+        Matches DataFilter._select_top_stocks which sorts by `percent` desc;
+        this ensures live screener and backtest pick the same top-N from the
+        same input set.
+        """
+        from scripts.screen_daily_candidates import _build_scored_candidates
 
-        # Arrange - high quality candidate
-        high_quality = {
-            'gap_percent': 5.0,
-            'eps_surprise_percent': 15.0,
-            'pre_earnings_change': 10.0,
-        }
+        items = [
+            {'code': 'LOW',  'percent':  5.0, 'gap': 6.0, 'trade_date': '2024-06-15'},
+            {'code': 'HIGH', 'percent': 25.0, 'gap': 1.0, 'trade_date': '2024-06-15'},
+            {'code': 'MID',  'percent': 12.0, 'gap': 4.0, 'trade_date': '2024-06-15'},
+        ]
+        result = _build_scored_candidates(items, '2024-06-15')
 
-        # Arrange - low quality candidate
-        low_quality = {
-            'gap_percent': 1.0,
-            'eps_surprise_percent': 5.0,
-            'pre_earnings_change': 0.0,
-        }
+        symbols_in_order = [c['symbol'] for c in result]
+        assert symbols_in_order == ['HIGH', 'MID', 'LOW']
 
-        # Act
-        high_score = calculate_candidate_score(high_quality)
-        low_score = calculate_candidate_score(low_quality)
+        # Score column equals the sort key (surprise %)
+        scores = [c['score'] for c in result]
+        surprises = [c['eps_surprise_percent'] for c in result]
+        assert scores == surprises
 
-        # Assert
-        assert high_score > low_score
+    def test_csv_includes_canonical_trade_date_column(self):
+        """CSV columns include both `date` (back-compat) and canonical `trade_date`."""
+        from scripts.screen_daily_candidates import _build_scored_candidates
+
+        items = [{'code': 'A', 'percent': 10.0, 'gap': 5.0, 'trade_date': '2024-06-15'}]
+        result = _build_scored_candidates(items, '2024-06-15')
+        c = result[0]
+
+        assert 'date' in c
+        assert 'trade_date' in c
+        assert c['date'] == c['trade_date'] == '2024-06-15'
 
 
 class TestDailyScreenerCLI:
@@ -380,22 +398,28 @@ class TestCriticalBugRegressions:
     @patch('scripts.screen_daily_candidates.DataFilter')
     @patch('scripts.screen_daily_candidates.build_target_universe')
     @patch('scripts.screen_daily_candidates.DataFetcher')
-    def test_pre_change_affects_candidate_score(
+    def test_candidates_ranked_by_eps_surprise_descending(
         self, MockDataFetcher, mock_build_universe, MockDataFilter
     ):
-        """C-2: pre_change from DataFilter must flow into scoring (regression for pre_earnings_change)"""
-        mock_build_universe.return_value = ({'AAPL', 'MSFT'}, 'fmp_screener')
+        """Phase 3a parity: ranking is EPS surprise % descending (matches DataFilter._select_top_stocks).
+
+        Replaces the prior `test_pre_change_affects_candidate_score`: the
+        weighted score formula was deleted in favor of surprise-only ranking
+        so that live screener and backtest pick the same top-N from the same
+        input set.
+        """
+        mock_build_universe.return_value = ({'AAPL', 'MSFT', 'NVDA'}, 'fmp_screener')
         mock_fetcher = MockDataFetcher.return_value
         mock_fetcher.get_earnings_data.return_value = {'earnings': []}
 
         mock_filter = MockDataFilter.return_value
         mock_filter.filter_earnings_data.return_value = [
             {'code': 'AAPL', 'trade_date': '2026-03-03', 'percent': 20,
-             'gap': 5, 'prev_close': 150, 'entry_price': 155,
-             'pre_change': 15.0},  # high momentum
-            {'code': 'MSFT', 'trade_date': '2026-03-03', 'percent': 20,
-             'gap': 5, 'prev_close': 300, 'entry_price': 310,
-             'pre_change': 0},  # no momentum
+             'gap': 5, 'prev_close': 150, 'entry_price': 155, 'pre_change': 0},
+            {'code': 'MSFT', 'trade_date': '2026-03-03', 'percent': 35,  # highest surprise
+             'gap': 1, 'prev_close': 300, 'entry_price': 305, 'pre_change': 15.0},
+            {'code': 'NVDA', 'trade_date': '2026-03-03', 'percent': 12,
+             'gap': 6, 'prev_close': 800, 'entry_price': 820, 'pre_change': 8.0},
         ]
 
         args = Mock()
@@ -408,12 +432,15 @@ class TestCriticalBugRegressions:
         from scripts.screen_daily_candidates import screen_candidates
         result = screen_candidates('2026-03-03', args)
 
-        assert len(result) == 2
-        # AAPL (pre_change=15) should score higher than MSFT (pre_change=0)
-        assert result[0]['symbol'] == 'AAPL'
-        assert result[1]['symbol'] == 'MSFT'
-        assert result[0]['score'] > result[1]['score'], \
-            f"AAPL score ({result[0]['score']}) should be > MSFT ({result[1]['score']}) due to pre_change"
+        assert len(result) == 3
+        # Surprise-descending order: MSFT(35) > AAPL(20) > NVDA(12)
+        # — independent of gap and pre_change.
+        symbols = [c['symbol'] for c in result]
+        assert symbols == ['MSFT', 'AAPL', 'NVDA'], (
+            f'Expected surprise-descending order, got {symbols}'
+        )
+        # `score` column equals the sort key (surprise %).
+        assert [c['score'] for c in result] == [35, 20, 12]
 
 
 if __name__ == "__main__":

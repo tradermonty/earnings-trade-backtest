@@ -56,8 +56,14 @@ class AlpacaOrderManager:
         qty: int,
         side: str = 'buy',
         client_order_id: Optional[str] = None,
+        **_,
     ) -> Dict[str, Any]:
-        """Submit a market order. Returns order dict or raises on failure."""
+        """Submit a market order. Returns order dict or raises on failure.
+
+        Accepts and ignores extra kwargs (e.g. ``reference_price``) so that callers
+        can use the same signature for live (`AlpacaOrderManager`) and dry-run
+        (`DryRunAccount`) without branching.
+        """
         if qty <= 0:
             raise ValueError(f"qty must be > 0, got {qty}")
 
@@ -161,15 +167,18 @@ class AlpacaOrderManager:
     def calculate_position_size(
         portfolio_value: float,
         position_size_pct: float,
-        prev_close: float,
+        entry_price: float,
         slippage_pct: float = 0.3,
     ) -> int:
         """Calculate number of shares to buy.
 
+        Pass the **raw** entry price (e.g. ``pre_open_price``); slippage is
+        applied internally exactly once. Do not pre-multiply the price.
+
         Matches RiskManager.calculate_position_size() logic:
-        shares = floor(portfolio_value * pct / (price * (1 + slippage)))
+        shares = floor(portfolio_value * pct / (entry_price * (1 + slippage)))
         """
-        adjusted_price = prev_close * (1 + slippage_pct / 100)
+        adjusted_price = entry_price * (1 + slippage_pct / 100)
         position_value = portfolio_value * position_size_pct / 100
         shares = math.floor(position_value / adjusted_price)
         return max(shares, 0)

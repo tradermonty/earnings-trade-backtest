@@ -24,7 +24,7 @@ import subprocess
 import sys
 import tempfile
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -34,21 +34,147 @@ sys.path.insert(0, os.path.join(project_root, 'src'))
 
 from filelock import FileLock
 from src.alpaca_order_manager import AlpacaOrderManager
+from src.config import DEFAULTS
+from src.paper_state import (
+    DRYRUN_STATE_DIR,
+    DryRunAccount,
+    LIVE_STATE_DIR,
+    StatePaths,
+    get_state_paths,
+)
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = os.path.join(project_root, 'data')
-TRADES_FILE = os.path.join(DATA_DIR, 'paper_trades.json')
-PENDING_ENTRIES_FILE = os.path.join(DATA_DIR, 'pending_entries.json')
-PENDING_EXITS_FILE = os.path.join(DATA_DIR, 'pending_exits.json')
-LOCK_FILE = os.path.join(DATA_DIR, '.paper_state.lock')
+# Legacy module-level paths preserved for backwards compatibility with existing
+# tests that import them. New code should use ``get_state_paths(state_dir)``
+# which resolves to either ``LIVE_STATE_DIR`` or ``DRYRUN_STATE_DIR``.
+DATA_DIR = LIVE_STATE_DIR
+_LIVE_PATHS = get_state_paths(LIVE_STATE_DIR)
+TRADES_FILE = _LIVE_PATHS.trades
+PENDING_ENTRIES_FILE = _LIVE_PATHS.pending_entries
+PENDING_EXITS_FILE = _LIVE_PATHS.pending_exits
+LOCK_FILE = _LIVE_PATHS.lock
 
-# Strategy parameters — must match BacktestConfig defaults (src/config.py)
-POSITION_SIZE_PCT = 10.0   # config.py:14 position_size = 10
-SLIPPAGE_PCT = 1.0         # config.py:15 slippage = 1.0
-STOP_LOSS_PCT = 10.0       # config.py:10 stop_loss = 10
-MARGIN_RATIO = 1.5         # config.py:22 margin_ratio = 1.5
-RISK_LIMIT_PCT = 6.0       # config.py:16 risk_limit = 6
+# Strategy parameters are sourced from DEFAULTS (src/config.py); no local hardcodes.
+# Use DEFAULTS.position_size, DEFAULTS.slippage, DEFAULTS.stop_loss,
+# DEFAULTS.margin_ratio, DEFAULTS.risk_limit, DEFAULTS.min_volume_20d directly.
+
+# Polling configuration for ``_submit_with_reconciliation`` (Phase 3c).
+# Live submission may return ``accepted``/``new`` momentarily before a fill.
+# Total wait = MAX_POLL_TRIES * POLL_INTERVAL_S = 20s.
+MAX_POLL_TRIES = 10
+POLL_INTERVAL_S = 2
+
+
+def _resolve_state_paths(state_dir: Optional[str], dry_run: bool) -> StatePaths:
+    """Resolve state paths, preferring explicit state_dir then dry-run isolation."""
+    if state_dir is None:
+        state_dir = DRYRUN_STATE_DIR if dry_run else LIVE_STATE_DIR
+    os.makedirs(state_dir, exist_ok=True)
+    return get_state_paths(state_dir)
+
+
+def _is_filled(result: Optional[Dict[str, Any]]) -> bool:
+    """Strict success: status == 'filled' AND filled_avg_price is positive."""
+    if not result:
+        return False
+    if result.get('status') != 'filled':
+        return False
+    fap = result.get('filled_avg_price')
+    return isinstance(fap, (int, float)) and fap > 0
+
+
+def _skip_entry(en: Dict[str, Any], reason: str) -> Dict[str, Any]:
+    """Uniform skip record: carries source entry so cleanup keys are unambiguous."""
+    return {
+        'entry': en,
+        'symbol': en.get('symbol'),
+        'trade_date': en.get('trade_date'),
+        'timing': en.get('timing'),
+        'reason': reason,
+    }
+
+
+def _skip_exit(ex: Dict[str, Any], reason: str) -> Dict[str, Any]:
+    return {
+        'exit': ex,
+        'symbol': ex.get('symbol'),
+        'reason': reason,
+    }
+
+
+def _submit_with_reconciliation(
+    mgr: Any,
+    symbol: str,
+    shares: int,
+    side: str,
+    cid: str,
+    *,
+    reference_price: float,
+) -> 'tuple[Dict[str, Any], int, str, Optional[str]]':
+    """Submit a market order with strict-fill semantics, polling, and partial-fill handling.
+
+    Returns ``(result, filled_shares, outcome, skip_reason)`` where:
+
+    - ``outcome`` ∈ {``filled_full``, ``filled_partial``, ``pending_unfilled``,
+      ``duplicate_unfilled``, ``rejected``, ``submit_error``}
+    - ``skip_reason`` is None for successful fills (filled_full / filled_partial)
+      and a short string for failures.
+
+    Behavior:
+
+    - On ``status == 'duplicate'``: look up the prior order by client_order_id.
+      If filled, treat as success. Otherwise mark ``duplicate_unfilled``.
+    - If the initial result is not ``filled``: poll
+      ``mgr.get_order_by_client_id(cid)`` up to ``MAX_POLL_TRIES`` times every
+      ``POLL_INTERVAL_S`` seconds (total ~20s). Cancel any partially-filled
+      remainder and return the filled portion.
+    - On polling exhaustion: return ``pending_unfilled`` so caller can persist
+      submission metadata for ``reconcile_pending_orders`` to resolve later.
+
+    The caller passes ``reference_price`` so dry-run paths
+    (``DryRunAccount.submit_market_order``) can fabricate a deterministic
+    fill price; live paths ignore it via ``**_`` absorbing.
+    """
+    import time as _time
+
+    try:
+        result = mgr.submit_market_order(
+            symbol, shares, side=side, client_order_id=cid,
+            reference_price=reference_price,
+        )
+        if result.get('status') == 'duplicate':
+            existing = mgr.get_order_by_client_id(cid)
+            if existing and _is_filled(existing):
+                return existing, int(existing.get('filled_qty', shares)), 'filled_full', None
+            return result, 0, 'duplicate_unfilled', 'duplicate_unfilled'
+        if _is_filled(result):
+            return result, int(result.get('filled_qty', shares)), 'filled_full', None
+        # Not immediately filled — poll for late fill
+        for _ in range(MAX_POLL_TRIES):
+            _time.sleep(POLL_INTERVAL_S)
+            existing = mgr.get_order_by_client_id(cid)
+            if not existing:
+                continue
+            status = existing.get('status')
+            if _is_filled(existing):
+                return existing, int(existing.get('filled_qty', shares)), 'filled_full', None
+            if status == 'partially_filled' and int(existing.get('filled_qty', 0)) > 0:
+                # Cancel remainder; record the filled portion as a partial success.
+                try:
+                    mgr.cancel_order(existing.get('id'))
+                except Exception as e:
+                    logger.warning(
+                        'cancel_order_failed for %s (%s): %s',
+                        symbol, existing.get('id'), e,
+                    )
+                return existing, int(existing['filled_qty']), 'filled_partial', None
+            if status in ('rejected', 'cancelled'):
+                return existing, 0, 'rejected', status
+        # Polling exhausted — let reconcile_pending_orders resolve later.
+        return result, 0, 'pending_unfilled', 'not_filled'
+    except Exception as e:
+        return {'error': str(e)}, 0, 'submit_error', f'submit_error_{str(e)[:40]}'
 
 
 def load_json(path):
@@ -81,14 +207,24 @@ def get_today_str():
         return datetime.now().strftime('%Y-%m-%d')
 
 
-def check_risk_gate(trades: List[Dict], portfolio_value: float) -> bool:
+def check_risk_gate(
+    trades: List[Dict],
+    portfolio_value: float,
+    today_str: Optional[str] = None,
+) -> bool:
     """Check if new entries are allowed based on recent P&L.
 
-    Returns True if new entries are allowed.
-    Matches RiskManager.check_risk_management() logic:
-    block if realized losses in last 30 days exceed risk_limit_pct.
+    Returns True if new entries are allowed. Matches
+    ``RiskManager.check_risk_management()`` logic: block if realized losses
+    in the last 30 days exceed ``DEFAULTS.risk_limit`` (%).
+
+    ``today_str`` is the canonical "now" for replay-deterministic tests.
+    Defaults to ``get_today_str()`` for live execution. Phase 3c (rev 11)
+    fix: explicit injection so parity tests don't depend on wall-clock.
     """
-    now = datetime.now()
+    if today_str is None:
+        today_str = get_today_str()
+    now = datetime.strptime(today_str, '%Y-%m-%d')
     total_pnl = 0.0
 
     for trade in trades:
@@ -100,9 +236,9 @@ def check_risk_gate(trades: List[Dict], portfolio_value: float) -> bool:
 
     if portfolio_value > 0:
         pnl_ratio = (total_pnl / portfolio_value) * 100
-        if pnl_ratio < -RISK_LIMIT_PCT:
+        if pnl_ratio < -DEFAULTS.risk_limit:
             print(f"RISK GATE: Recent 30-day P&L {pnl_ratio:.1f}% exceeds "
-                  f"-{RISK_LIMIT_PCT}% limit. Blocking new entries.")
+                  f"-{DEFAULTS.risk_limit}% limit. Blocking new entries.")
             return False
 
     return True
@@ -270,7 +406,7 @@ def execute_pending(dry_run: bool = False):
     # Margin check
     positions = mgr.get_positions()
     total_position_value = sum(p['market_value'] for p in positions)
-    margin_room = portfolio_value * MARGIN_RATIO - total_position_value
+    margin_room = portfolio_value * DEFAULTS.margin_ratio - total_position_value
 
     # Re-verify AMC candidates at entry time (gap/volume/price)
     # AMC candidates were screened without trade-date bars;
@@ -318,16 +454,16 @@ def execute_pending(dry_run: bool = False):
                 print(f"  SKIP {sym}: negative gap ({gap:.1f}%)")
                 skipped_entries.append(en)
                 continue
-            if gap > 10.0:
+            if gap > DEFAULTS.max_gap_percent:
                 print(f"  SKIP {sym}: gap too large ({gap:.1f}%)")
                 skipped_entries.append(en)
                 continue
-            if today_open < 30.0:
-                print(f"  SKIP {sym}: price ${today_open:.2f} < $30")
+            if today_open < DEFAULTS.screener_price_min:
+                print(f"  SKIP {sym}: price ${today_open:.2f} < ${DEFAULTS.screener_price_min:.0f}")
                 skipped_entries.append(en)
                 continue
-            if avg_volume < 200000:
-                print(f"  SKIP {sym}: volume {avg_volume:.0f} < 200K")
+            if avg_volume < DEFAULTS.min_volume_20d:
+                print(f"  SKIP {sym}: volume {avg_volume:.0f} < {DEFAULTS.min_volume_20d}")
                 skipped_entries.append(en)
                 continue
 
@@ -349,8 +485,8 @@ def execute_pending(dry_run: bool = False):
             continue
 
         shares = AlpacaOrderManager.calculate_position_size(
-            portfolio_value, POSITION_SIZE_PCT,
-            en['prev_close'], SLIPPAGE_PCT,
+            portfolio_value, DEFAULTS.position_size,
+            en['prev_close'], DEFAULTS.slippage,
         )
         if shares <= 0:
             print(f"  SKIP {en['symbol']}: 0 shares (price too high)")
@@ -432,7 +568,7 @@ def execute_pending(dry_run: bool = False):
                 result = er['result']
                 shares = er['shares']
                 fill_price = result.get('filled_avg_price') or en['prev_close']
-                stop_price = fill_price * (1 - STOP_LOSS_PCT / 100) if fill_price else 0
+                stop_price = fill_price * (1 - DEFAULTS.stop_loss / 100) if fill_price else 0
 
                 new_trade = {
                     'symbol': en['symbol'],

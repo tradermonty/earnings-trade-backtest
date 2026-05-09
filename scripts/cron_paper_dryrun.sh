@@ -32,10 +32,15 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 VENV_DIR="${PROJECT_DIR}/venv311"
 PYTHON="${VENV_DIR}/bin/python"
 LOG_DIR="${PROJECT_DIR}/logs/paper_dryrun"
+DRYRUN_STATE_DIR="${PROJECT_DIR}/data/dryrun"
 DATE=$(date '+%Y-%m-%d')
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S %Z')
 
+# Ensure log and dry-run state directories exist before any python invocation.
+# Phase 3b: dry-run uses a separate state dir so the screen→execute→exit
+# handoff works without touching live state at data/.
 mkdir -p "$LOG_DIR"
+mkdir -p "$DRYRUN_STATE_DIR"
 
 MODE="${1:-help}"
 
@@ -65,6 +70,18 @@ case "$MODE" in
         log "AMC screen complete"
         ;;
 
+    reconcile)
+        # Phase 3b/Phase 3d: post-09:30-fill reconciliation. Discovers orders
+        # that returned `accepted` at 09:30 but filled later. Runs at 16:03 ET
+        # (between AMC screen at 16:00 and exit monitor at 16:05) to ensure
+        # the exit monitor sees the latest filled positions. In dry-run mode
+        # this is a no-op (DryRunAccount fills are immediate).
+        log "=== Reconcile Pending Orders Dry-Run ==="
+        "$PYTHON" "${SCRIPT_DIR}/reconcile_pending_orders.py" --dry-run \
+            >> "${LOG_DIR}/${DATE}.log" 2>&1
+        log "Reconcile dry-run complete"
+        ;;
+
     exit)
         log "=== Exit Monitor Dry-Run ==="
         "$PYTHON" "${SCRIPT_DIR}/paper_exit_monitor.py" --dry-run \
@@ -82,6 +99,7 @@ case "$MODE" in
 0 6 * * 1-5 ${SCRIPT_DIR}/cron_paper_dryrun.sh bmo
 30 6 * * 1-5 ${SCRIPT_DIR}/cron_paper_dryrun.sh execute
 0 13 * * 1-5 ${SCRIPT_DIR}/cron_paper_dryrun.sh amc
+3 13 * * 1-5 ${SCRIPT_DIR}/cron_paper_dryrun.sh reconcile
 5 13 * * 1-5 ${SCRIPT_DIR}/cron_paper_dryrun.sh exit
 CRON
 
@@ -104,13 +122,14 @@ CRON
         ;;
 
     help|*)
-        echo "Usage: $0 {bmo|execute|amc|exit|install|status}"
+        echo "Usage: $0 {bmo|execute|amc|reconcile|exit|install|status}"
         echo ""
-        echo "  bmo      - Screen BMO candidates (9:00 AM ET / 6:00 AM PDT)"
-        echo "  execute  - Dry-run execute pending (9:30 AM ET / 6:30 AM PDT)"
-        echo "  amc      - Screen AMC candidates (4:00 PM ET / 1:00 PM PDT)"
-        echo "  exit     - Dry-run exit monitor (4:05 PM ET / 1:05 PM PDT)"
-        echo "  install  - Install cron jobs"
-        echo "  status   - Show recent logs"
+        echo "  bmo        - Screen BMO candidates (9:00 AM ET / 6:00 AM PDT)"
+        echo "  execute    - Dry-run execute pending (9:30 AM ET / 6:30 AM PDT)"
+        echo "  amc        - Screen AMC candidates (4:00 PM ET / 1:00 PM PDT)"
+        echo "  reconcile  - Reconcile pending orders (4:03 PM ET / 1:03 PM PDT)"
+        echo "  exit       - Dry-run exit monitor (4:05 PM ET / 1:05 PM PDT)"
+        echo "  install    - Install cron jobs"
+        echo "  status     - Show recent logs"
         ;;
 esac

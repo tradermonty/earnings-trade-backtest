@@ -162,6 +162,30 @@ python -m pytest tests/ -v
 python -m pytest tests/test_close_entry_filter.py -v
 ```
 
+### Backtest-to-Live Parity Contract (REQUIRED READING)
+
+`docs/parity_notes.md` に、`main.py` バックテストとペーパートレーディング
+パイプライン (`scripts/paper_auto_entry.py`, `scripts/paper_exit_monitor.py`)
+の **受容済み乖離点** をまとめている。以下のファイルを編集する前に必ず読み、
+契約に影響する変更があれば `parity_notes.md` の該当節を更新すること:
+
+- `src/config.py` (`StrategyDefaults`, `BacktestConfig`)
+- `src/data_filter.py` (第二段フィルタ、`_check_price_change`)
+- `src/filter_utils.py` (look-ahead-safe 計算ヘルパ)
+- `src/trade_executor.py` (部分利確、トレーリング、最大保有日数)
+- `src/paper_state.py` (`DryRunAccount`, `StatePaths`)
+- `scripts/screen_daily_candidates.py` (ランキング、canonical fields)
+- `scripts/paper_auto_entry.py` (`execute_pending`, `check_risk_gate`)
+- `scripts/paper_exit_monitor.py` (出口条件、dry-run state)
+
+戦略定数 (`position_size`, `slippage`, `stop_loss` 等) はすべて
+`src/config.py` の `DEFAULTS = StrategyDefaults()` シングルトンが単一情報源。
+ハードコードを再導入してはならない (`tests/test_strategy_defaults.py` で検出)。
+
+ペーパートレード dry-run は `data/dryrun/` を使用しライブ state (`data/`)
+を汚染しない。`DryRunAccount` (`src/paper_state.py`) が `AlpacaOrderManager`
+代替として動き、`ALPACA_API_KEY_PAPER` なしで動作する。
+
 ## Notes
 
 - The system defaults to targeting mid/small cap stocks (S&P 400/600)

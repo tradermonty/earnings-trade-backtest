@@ -69,7 +69,7 @@ def parse_arguments():
                         help='Minimum stock price')
     parser.add_argument('--min_market_cap', type=float, default=5.0,
                         help='Minimum market cap in billions')
-    # Volume filtering is hardcoded at 200K in DataFilter._check_final_conditions()
+    # Volume filter: see DEFAULTS.min_volume_20d (used in DataFilter._check_final_conditions)
 
     # Market timing filter (for paper trading BMO/AMC split)
     parser.add_argument('--market_timing', type=str, default=None,
@@ -97,47 +97,6 @@ def get_output_filename(date_str: str) -> str:
     return f'daily_candidates_{date_str}.csv'
 
 
-def calculate_candidate_score(candidate: Dict[str, Any]) -> float:
-    """
-    Calculate candidate quality score.
-    Higher score = better quality candidate.
-
-    Score components:
-    - EPS surprise (weight: 40%)
-    - Gap percentage (weight: 30%) - moderate gap is better
-    - Pre-earnings momentum (weight: 30%)
-    """
-    score = 0.0
-
-    # EPS surprise contribution (0-40 points)
-    eps_surprise = candidate.get('eps_surprise_percent', 0)
-    if eps_surprise > 0:
-        # Cap at 50% surprise for scoring purposes
-        capped_surprise = min(eps_surprise, 50)
-        score += (capped_surprise / 50) * 40
-
-    # Gap contribution (0-30 points)
-    # Ideal gap is 3-7%, too small or too large is less desirable
-    gap = candidate.get('gap_percent', 0)
-    if 3 <= gap <= 7:
-        score += 30
-    elif 1 <= gap < 3:
-        score += 20
-    elif 7 < gap <= 10:
-        score += 20
-    elif 0 < gap < 1:
-        score += 10
-
-    # Pre-earnings momentum (0-30 points)
-    pre_change = candidate.get('pre_earnings_change', 0)
-    if pre_change > 0:
-        # Positive pre-earnings trend is good, cap at 20%
-        capped_pre = min(pre_change, 20)
-        score += (capped_pre / 20) * 30
-
-    return round(score, 1)
-
-
 def _fetch_earnings_for_date(data_fetcher, date_str, target_symbols):
     """Fetch earnings data covering prev business day + target date.
 
@@ -159,13 +118,26 @@ def _fetch_earnings_for_date(data_fetcher, date_str, target_symbols):
 
 
 def _build_scored_candidates(filtered_candidates, date_str):
-    """Transform DataFilter output into scored, sorted candidate dicts."""
+    """Transform DataFilter output into surprise-ranked candidate dicts.
+
+    Sort key matches `DataFilter._select_top_stocks` (`percent` desc) so the
+    live screener and backtest pick the same top-N from the same input set.
+    The `score` column is preserved for backwards compatibility but now
+    equals `eps_surprise_percent` (no separate weighted score).
+
+    CSV columns include both `date` (= trade_date for backwards-compat) and
+    canonical `trade_date` so downstream consumers can switch over without a
+    breaking change.
+    """
     candidates = []
     for item in filtered_candidates:
+        trade_date = item.get('trade_date', date_str)
+        eps_surprise = float(item.get('percent', 0) or 0)
         candidate = {
-            'date': item.get('trade_date', date_str),
+            'date': trade_date,
+            'trade_date': trade_date,
             'symbol': item.get('code', ''),
-            'eps_surprise_percent': item.get('percent', 0),
+            'eps_surprise_percent': eps_surprise,
             'gap_percent': item.get('gap', 0),
             'pre_earnings_change': item.get('pre_change', 0),
             'sector': item.get('sector', ''),
@@ -175,11 +147,12 @@ def _build_scored_candidates(filtered_candidates, date_str):
             'estimate_eps': item.get('estimate', 0),
             'prev_close': item.get('prev_close', 0),
             'entry_price': item.get('entry_price', 0),
+            # `score` retained for CSV backwards compatibility; equals surprise %.
+            'score': eps_surprise,
         }
-        candidate['score'] = calculate_candidate_score(candidate)
         candidates.append(candidate)
 
-    candidates.sort(key=lambda x: x['score'], reverse=True)
+    candidates.sort(key=lambda x: x['eps_surprise_percent'], reverse=True)
     return candidates
 
 
@@ -262,22 +235,37 @@ def _filter_lightweight(
     return candidates
 
 
-def screen_candidates(date_str: str, args) -> List[Dict[str, Any]]:
+def screen_candidates(
+    date_str: str,
+    args,
+    *,
+    data_fetcher: Optional['DataFetcher'] = None,
+    target_symbols: Optional[set] = None,
+) -> List[Dict[str, Any]]:
     """Screen for entry candidates on given date.
 
     Uses the same FMP stock_screener pre-filter as the backtest engine
     to ensure universe consistency.
+
+    Parameters
+    ----------
+    data_fetcher : optional DataFetcher
+        Inject a fake/mock DataFetcher in tests; defaults to live FMP.
+    target_symbols : optional set
+        Inject a precomputed universe in tests; defaults to FMP screener.
     """
     print(f"Screening candidates for {date_str}...")
 
-    data_fetcher = DataFetcher(use_fmp=True)
+    if data_fetcher is None:
+        data_fetcher = DataFetcher(use_fmp=True)
 
-    # 1. Build target universe
-    target_symbols, _source = build_target_universe(
-        data_fetcher,
-        screener_price_min=args.min_price,
-        min_market_cap=args.min_market_cap * 1e9,
-    )
+    # 1. Build target universe (or use injected)
+    if target_symbols is None:
+        target_symbols, _source = build_target_universe(
+            data_fetcher,
+            screener_price_min=args.min_price,
+            min_market_cap=args.min_market_cap * 1e9,
+        )
 
     if target_symbols is None:
         print("WARNING: FMP screener returned no symbols. Aborting screening.")

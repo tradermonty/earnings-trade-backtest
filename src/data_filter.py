@@ -7,6 +7,8 @@ from tqdm import tqdm
 from .data_fetcher import DataFetcher
 from .earnings_date_validator import EarningsDateValidator
 from .news_fetcher import NewsFetcher
+from .config import DEFAULTS
+from .filter_utils import compute_pre_earnings_change, compute_avg_volume_20d
 
 
 # Japanese ADR symbols traded on US exchanges (NYSE/NASDAQ/OTC)
@@ -324,8 +326,12 @@ class DataFilter:
                     tqdm.write(f"- 注意: プレオープン価格取得失敗、日足オープン価格を使用 ({symbol} {trade_date})")
                 gap = (pre_open_price - prev_day_data['Close']) / prev_day_data['Close'] * 100
 
-                # 平均出来高を計算
-                avg_volume = stock_data['Volume'].tail(20).mean()
+                # 平均出来高を計算 (look-ahead-safe; uses only bars strictly before trade_date)
+                avg_volume = compute_avg_volume_20d(stock_data, trade_date)
+                if avg_volume is None:
+                    tqdm.write("- スキップ: 20日分の出来高データなし")
+                    skipped_count += 1
+                    continue
                 
                 tqdm.write(f"- ギャップ率: {gap:.1f}% (pre-open)")
                 tqdm.write(f"- 株価: ${trade_date_data['Open']:.2f}")
@@ -409,21 +415,20 @@ class DataFilter:
             return True, True  # fail-open
 
     def _check_price_change(self, stock_data: pd.DataFrame, trade_date: str, symbol: str):
-        """過去20日間の価格変化率をチェック。(passed, value) を返す。"""
-        try:
-            current_close = stock_data.loc[:trade_date].iloc[-1]['Close']
-            price_20d_ago = stock_data.loc[:trade_date].iloc[-20]['Close']
-            price_change = ((current_close - price_20d_ago) / price_20d_ago) * 100
-            tqdm.write(f"- 過去20日間の価格変化率: {price_change:.1f}%")
+        """過去20日間の価格変化率をチェック (look-ahead-safe; uses only rows < trade_date).
 
-            if price_change < self.pre_earnings_change:
-                tqdm.write(f"- スキップ: 価格変化率が{self.pre_earnings_change}%未満")
-                return False, price_change
-            return True, price_change
-
-        except (KeyError, IndexError):
+        (passed, value) を返す。filter_utils.compute_pre_earnings_change に委譲することで
+        backtest と live screener が同じ計算経路を共有する。
+        """
+        price_change = compute_pre_earnings_change(stock_data, trade_date)
+        if price_change is None:
             tqdm.write("- スキップ: 20日分の価格データなし")
             return False, 0.0
+        tqdm.write(f"- 過去20日間の価格変化率: {price_change:.1f}%")
+        if price_change < self.pre_earnings_change:
+            tqdm.write(f"- スキップ: 価格変化率が{self.pre_earnings_change}%未満")
+            return False, price_change
+        return True, price_change
     
     def _get_trade_date_data(self, stock_data: pd.DataFrame, trade_date: str, symbol: str):
         """トレード日のデータを取得"""
@@ -451,21 +456,21 @@ class DataFilter:
         if price < self.screener_price_min:
             tqdm.write(f"- スキップ: 株価が${self.screener_price_min:.0f}未満")
             return False
-        if avg_volume < 200000:
-            tqdm.write("- スキップ: 出来高不足")
+        if avg_volume < DEFAULTS.min_volume_20d:
+            tqdm.write(f"- スキップ: 出来高不足 (< {DEFAULTS.min_volume_20d:,})")
             return False
         return True
-    
+
     def _select_top_stocks(self, date_stocks: Dict[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-        """各日付で上位5銘柄を選択"""
+        """各日付で上位 DEFAULTS.top_n_per_day 銘柄を選択"""
         selected_stocks = []
-        print("\n日付ごとの選択（上位5銘柄）:")
-        
+        print(f"\n日付ごとの選択（上位{DEFAULTS.top_n_per_day}銘柄）:")
+
         for trade_date in sorted(date_stocks.keys()):
             # percentで降順ソート
             date_stocks[trade_date].sort(key=lambda x: float(x['percent']), reverse=True)
-            # 上位5銘柄を選択
-            selected = date_stocks[trade_date][:5]
+            # 上位N銘柄を選択
+            selected = date_stocks[trade_date][:DEFAULTS.top_n_per_day]
             selected_stocks.extend(selected)
             
             print(f"\n{trade_date}: {len(selected)}銘柄")

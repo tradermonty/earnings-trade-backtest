@@ -6,6 +6,7 @@ import logging
 
 from .data_fetcher import DataFetcher
 from .risk_manager import RiskManager
+from .config import DEFAULTS
 
 
 class TradeExecutor:
@@ -425,7 +426,7 @@ class TradeExecutor:
             entry_day_close = trade_data.iloc[entry_idx]['Close']
             entry_day_profit_rate = ((entry_day_close - entry_price) / entry_price) * 100
             
-            if entry_day_profit_rate >= 6:
+            if entry_day_profit_rate >= DEFAULTS.partial_profit_threshold:
                 # 半分のポジションを利確（スリッページを適用）
                 half_shares = shares // 2
                 if half_shares > 0:

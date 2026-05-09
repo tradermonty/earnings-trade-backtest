@@ -2,33 +2,62 @@ from dataclasses import dataclass
 from typing import Optional, Set
 
 
+@dataclass(frozen=True)
+class StrategyDefaults:
+    """Single source of truth for strategy parameters shared by backtest and live paper trading.
+
+    Values match main.py CLI defaults (canonical per backtest-to-live parity plan).
+    Both BacktestConfig and paper scripts (paper_auto_entry, paper_exit_monitor) read from
+    DEFAULTS so changes propagate to all execution paths without drift.
+    """
+    position_size: float = 15.0
+    slippage: float = 0.3
+    stop_loss: float = 10.0
+    margin_ratio: float = 1.5
+    risk_limit: float = 6.0
+    partial_profit_threshold: float = 6.0
+    trail_stop_ma: int = 21
+    max_holding_days: int = 90
+    pre_earnings_change: float = 0.0
+    max_gap_percent: float = 10.0
+    min_surprise_percent: float = 5.0
+    screener_price_min: float = 30.0
+    min_market_cap: float = 5e9
+    min_volume_20d: int = 200_000
+    top_n_per_day: int = 5
+    initial_capital: float = 100_000.0
+
+
+DEFAULTS = StrategyDefaults()
+
+
 @dataclass
 class BacktestConfig:
     """バックテスト設定クラス"""
     start_date: str
     end_date: str
-    stop_loss: float = 10  # ドリフト戦略と同じ
-    trail_stop_ma: int = 21
-    max_holding_days: int = 90
-    initial_capital: float = 100000
-    position_size: float = 10
-    slippage: float = 1.0  # 現実的なスリッページ (0.3%は楽観的すぎる)
-    risk_limit: float = 6
+    stop_loss: float = DEFAULTS.stop_loss
+    trail_stop_ma: int = DEFAULTS.trail_stop_ma
+    max_holding_days: int = DEFAULTS.max_holding_days
+    initial_capital: float = DEFAULTS.initial_capital
+    position_size: float = DEFAULTS.position_size
+    slippage: float = DEFAULTS.slippage
+    risk_limit: float = DEFAULTS.risk_limit
     partial_profit: bool = True
     sp500_only: bool = False
     mid_small_only: bool = False  # デフォルトで全銘柄を対象とする
     language: str = 'en'
-    pre_earnings_change: float = 0
-    margin_ratio: float = 1.5
+    pre_earnings_change: float = DEFAULTS.pre_earnings_change
+    margin_ratio: float = DEFAULTS.margin_ratio
     target_symbols: Optional[Set[str]] = None
     enable_earnings_date_validation: bool = False
     use_fmp_data: bool = True  # デフォルトでFMPを使用
 
     # ギャップ上限設定
-    max_gap_percent: float = 10.0  # デフォルト: 10%
+    max_gap_percent: float = DEFAULTS.max_gap_percent
 
     # 最小EPSサプライズ率設定
-    min_surprise_percent: float = 5.0  # デフォルト: 5%
+    min_surprise_percent: float = DEFAULTS.min_surprise_percent
 
     # FMPスクリーナー追加ファンダメンタル条件
     max_ps_ratio: float | None = None  # 最大P/S
@@ -36,11 +65,11 @@ class BacktestConfig:
     min_profit_margin: float | None = None  # 最低Profit Margin (%)
 
     # FMPスクリーナーパラメータ (ドリフト戦略と同じ)
-    screener_price_min: float = 30.0  # $30以上
-    # Volume filtering: hardcoded at 200K in DataFilter._check_final_conditions()
+    screener_price_min: float = DEFAULTS.screener_price_min
+    # Volume filter: see DEFAULTS.min_volume_20d (used in DataFilter._check_final_conditions)
 
     # 時価総額ベースフィルタリング設定 (ドリフト戦略と同じ)
-    min_market_cap: float = 5e9  # 最小時価総額 ($5B)
+    min_market_cap: float = DEFAULTS.min_market_cap
     max_market_cap: float = 0  # 上限なし
     
     # 動的ポジションサイズ設定（オプション）

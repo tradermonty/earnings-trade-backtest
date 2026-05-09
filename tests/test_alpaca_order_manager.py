@@ -16,7 +16,7 @@ class TestPositionSizing:
     def test_basic_sizing(self):
         shares = AlpacaOrderManager.calculate_position_size(
             portfolio_value=100000, position_size_pct=15.0,
-            prev_close=50.0, slippage_pct=0.3,
+            entry_price=50.0, slippage_pct=0.3,
         )
         # 100000 * 0.15 / (50 * 1.003) = 15000 / 50.15 = 299.1
         assert shares == 299
@@ -24,14 +24,14 @@ class TestPositionSizing:
     def test_sizing_with_zero_slippage(self):
         shares = AlpacaOrderManager.calculate_position_size(
             portfolio_value=100000, position_size_pct=10.0,
-            prev_close=100.0, slippage_pct=0.0,
+            entry_price=100.0, slippage_pct=0.0,
         )
         assert shares == 100
 
     def test_sizing_floors_to_integer(self):
         shares = AlpacaOrderManager.calculate_position_size(
             portfolio_value=100000, position_size_pct=15.0,
-            prev_close=33.14, slippage_pct=0.3,
+            entry_price=33.14, slippage_pct=0.3,
         )
         expected = math.floor(15000 / (33.14 * 1.003))
         assert shares == expected
@@ -39,7 +39,7 @@ class TestPositionSizing:
     def test_sizing_returns_zero_for_expensive_stock(self):
         shares = AlpacaOrderManager.calculate_position_size(
             portfolio_value=100, position_size_pct=1.0,
-            prev_close=500.0, slippage_pct=0.3,
+            entry_price=500.0, slippage_pct=0.3,
         )
         assert shares == 0
 
