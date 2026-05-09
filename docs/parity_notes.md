@@ -125,17 +125,75 @@ Exit reasons (after fix): trailing_stop=16, end_of_data=10, stop_loss=6,
 partial_profit=2, stop_loss_intraday=1. (`end_of_data` = open positions
 at the YTD cutoff; final P&L still pending exit triggers.)
 
-#### Year-by-year pattern
+#### 2021 calendar year — modest positive
 
-| Year | Trades | Win % | PF | MDD | Return |
-|---|---|---|---|---|---|
-| 2024 | 82 | 68.3% | 2.79 | 3.04% | **+45.47%** |
-| 2025 | 104 | 53.9% | 0.93 | 16.01% | **-3.91%** |
-| 2026 YTD | 35 | 62.9% | 1.51 | 6.34% | **+7.01%** |
+| Metric | After fix |
+|---|---|
+| Trades | 81 |
+| Win rate | 56.8% |
+| Profit factor | 1.38 |
+| Max drawdown | 7.79% |
+| Avg holding period | 32.15d |
+| Total return | **+14.76%** |
+
+Exit reasons (after fix): trailing_stop=60, stop_loss=18, stop_loss_intraday=2,
+partial_profit=1. (Strong post-COVID rally tape; the strategy
+participated but did not match SPX's +27%. Lower stop_loss-rate (~25%)
+correlated with cleaner trend continuation than the bear-tape years.)
+
+#### 2022 calendar year — bear-tape modest positive
+
+| Metric | After fix |
+|---|---|
+| Trades | 76 |
+| Win rate | 50.0% |
+| Profit factor | 1.10 |
+| Max drawdown | 16.77% |
+| Avg holding period | 27.32d |
+| Total return | **+3.79%** |
+
+Exit reasons (after fix): trailing_stop=50, stop_loss=23, partial_profit=2,
+stop_loss_intraday=1. (S&P 500 closed -19% in 2022; the strategy
+delivered a small positive return but with stop_loss exits at 30% of
+trades — comparable degradation pattern to 2025.)
+
+#### 2023 calendar year — modest positive
+
+| Metric | After fix |
+|---|---|
+| Trades | 96 |
+| Win rate | 57.3% |
+| Profit factor | 1.12 |
+| Max drawdown | 15.77% |
+| Avg holding period | 29.2d |
+| Total return | **+4.80%** |
+
+Exit reasons (after fix): trailing_stop=61, stop_loss=22, partial_profit=9,
+max_holding_days=3, stop_loss_intraday=1.
+
+#### Year-by-year pattern (5 years observed)
+
+| Year | Trades | Win % | PF | MDD | stop_loss % | Return | Note |
+|---|---|---|---|---|---|---|---|
+| 2022 | 76 | 50.0% | 1.10 | 16.77% | 30% | +3.79% | bear tape |
+| 2023 | 96 | 57.3% | 1.12 | 15.77% | 23% | +4.80% | recovery year |
+| 2024 | 82 | 68.3% | **2.79** | **3.04%** | 7% | **+45.47%** | trend-followed cleanly |
+| 2025 | 104 | 53.9% | 0.93 | 16.01% | 27% | -3.91% | down-year |
+| 2026 YTD | 35 | 62.9% | 1.51 | 6.34% | 17% | +7.01% | mark-to-market (10/35 open) |
+
+**Average across 5 years**: arithmetic mean ≈ +11.4% / year, but this is
+dominated by the 2024 result. **Excluding 2024** (which may be an
+outlier): arithmetic mean ≈ +2.9% / year — a much weaker case.
+
+**Stop-loss-rate pattern** (stop_loss + stop_loss_intraday) / trades:
+2022=32%, 2023=24%, 2024=10%, 2025=32%, 2026 YTD=20%. Lower stop-loss
+rate strongly correlates with better year-end return. The strategy is
+**sensitive to whether positions trend cleanly past the 10% stop-loss
+distance**, rather than chopping below it.
 
 Annualized 2026 (extrapolating 7.01% over 4.3 months × 12/4.3): ~+19.6%
-gross. Note 10/35 trades are still `end_of_data` (open at cutoff), so the
-realized 2026 figure may shift up or down as those positions hit
+gross. Note 10/35 trades are still `end_of_data` (open at cutoff), so
+the realized 2026 figure may shift up or down as those positions hit
 trailing_stop / stop_loss / max_holding.
 
 #### Critical implications
@@ -144,13 +202,13 @@ trailing_stop / stop_loss / max_holding.
    relied on two distinct look-ahead leaks: same-day close in
    `_check_price_change` and post-earnings volume in
    `_second_stage_filter`.
-2. The strategy is **regime-dependent**, not fundamentally broken. 2024
-   shows strong corrected performance (+45% with PF 2.79 and 3% MDD) using
-   the same look-ahead-safe filter logic. 2025 is a tougher tape for this setup
-   (higher correlation, fewer beat-and-raise follow-through, possibly
-   lower dispersion of earnings reactions). 2026 YTD has recovered to
-   ~+7% with PF 1.51 and MDD 6.34%, consistent with a regime that gives
-   the strategy positive expectancy again.
+2. The strategy is **regime-dependent**. Across 5 observed years
+   (2022-2026 YTD), 4 of 5 years are positive but only 2024 is strongly
+   positive. PF spans 0.93 to 2.79; MDD spans 3% to 17%. The 2024
+   result (+45%, PF 2.79, MDD 3%) appears to be an outlier rather than
+   the typical year — most years cluster around +3% to +7% with PF
+   barely above 1 and MDD ~16%. 2025 is the only negative year in the
+   sample.
 3. Parameters were probably tuned against the inflated 2025 number; the
    corrected 2025 result puts that tuning on shaky ground. Parameter
    sweeps on **both** years (and any 2024 before-fix comparison if
@@ -162,18 +220,26 @@ trailing_stop / stop_loss / max_holding.
 #### Action items (next session)
 
 - Parameter sweeps (`min_surprise`, `max_gap`, `pre_earnings_change`,
-  `position_size`) against 2024 / 2025 / 2026 YTD jointly to find a
-  setting that performs robustly across all three regimes.
-- Investigate 2025 specifically: why did stop_loss exits more than
-  quadruple (6 → 28) while trailing_stop exits dropped (68 → 60)?
-  Likely root cause: lower follow-through after positive earnings →
-  more positions hit the 10% stop before MA21 catches up.
-- Consider stratifying by sector to see whether 2025 underperformance
-  concentrates in specific groups (e.g. small-cap vs large-cap, growth
-  vs value).
-- Decide: ship the strategy as regime-dependent (with documented
-  drawdown years) or seek a more robust variant. The 2026 YTD recovery
-  argues for "regime-dependent but viable", not "broken".
+  `position_size`, `stop_loss`) against the full 5-year window
+  (2022-01-01..2026-05-09) jointly. Optimize on aggregated PF and MDD
+  rather than any single year, given the 2024 outlier.
+- Investigate the **stop_loss-rate driver**: years with stop_loss rate
+  ≤10% (2024) drastically outperform years with stop_loss rate ≥24%
+  (2022/2023/2025). What market characteristic predicts a low
+  stop_loss-rate regime? Candidates: SPX trend strength, sector
+  dispersion, earnings beat-and-raise follow-through.
+- Consider widening the stop_loss distance or pairing it with an
+  adaptive (volatility-scaled) stop. The current fixed 10% may be
+  cutting too many positions in choppier tapes.
+- Stratify by sector to see whether degradation concentrates in
+  specific groups across the down-year sample (2022/2025).
+- Decide on deployment posture given the 5-year picture:
+  - **conservative**: ship with reduced position size (e.g. 7-8%
+    instead of 15%) given the 4-of-5 years cluster around +3-7%;
+  - **regime-aware**: add a top-of-book filter (only trade when SPX is
+    in clean uptrend) to skip 2022/2025-like tapes;
+  - **revisit thesis**: if no parameter set achieves PF>1.3 over the
+    full 5-year window, reconsider the underlying setup.
 
 ---
 
