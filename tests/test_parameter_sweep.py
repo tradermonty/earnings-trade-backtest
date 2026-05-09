@@ -31,13 +31,15 @@ def test_iter_parameter_grid_expands_all_dimensions():
         min_surprises=[5, 10],
         max_gaps=[8],
         pre_earnings_changes=[0, 5],
+        stop_losses=[8, 10],
         position_sizes=[10, 15],
     )
-    assert len(grid) == 8
+    assert len(grid) == 16
     assert grid[0] == {
         'min_surprise': 5.0,
         'max_gap': 8.0,
         'pre_earnings_change': 0.0,
+        'stop_loss': 8.0,
         'position_size': 10.0,
     }
 
@@ -49,6 +51,7 @@ def test_summarize_combination_uses_worst_period_first():
             'min_surprise': 5.0,
             'max_gap': 10.0,
             'pre_earnings_change': 0.0,
+            'stop_loss': 10.0,
             'position_size': 15.0,
         },
         {
@@ -83,8 +86,20 @@ def test_run_sweep_ranks_by_worst_return_before_average():
         Period('bad', '2025-01-01', '2025-12-31'),
     ]
     grid = [
-        {'min_surprise': 5.0, 'max_gap': 10.0, 'pre_earnings_change': 0.0, 'position_size': 15.0},
-        {'min_surprise': 10.0, 'max_gap': 8.0, 'pre_earnings_change': 0.0, 'position_size': 10.0},
+        {
+            'min_surprise': 5.0,
+            'max_gap': 10.0,
+            'pre_earnings_change': 0.0,
+            'stop_loss': 10.0,
+            'position_size': 15.0,
+        },
+        {
+            'min_surprise': 10.0,
+            'max_gap': 8.0,
+            'pre_earnings_change': 0.0,
+            'stop_loss': 8.0,
+            'position_size': 10.0,
+        },
     ]
 
     def runner(period, params):

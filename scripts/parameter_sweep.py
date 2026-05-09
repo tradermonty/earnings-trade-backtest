@@ -11,6 +11,7 @@ Examples:
         --min-surprise 5,7.5,10 \
         --max-gap 8,10 \
         --pre-earnings-change 0,5 \
+        --stop-loss 8,10,12 \
         --position-size 10,15 \
         --output reports/parameter_sweep_summary.csv
 """
@@ -102,16 +103,18 @@ def iter_parameter_grid(
     min_surprises: Iterable[float],
     max_gaps: Iterable[float],
     pre_earnings_changes: Iterable[float],
+    stop_losses: Iterable[float],
     position_sizes: Iterable[float],
 ) -> List[ParamSet]:
     grid = []
-    for min_surprise, max_gap, pre_change, position_size in product(
-        min_surprises, max_gaps, pre_earnings_changes, position_sizes,
+    for min_surprise, max_gap, pre_change, stop_loss, position_size in product(
+        min_surprises, max_gaps, pre_earnings_changes, stop_losses, position_sizes,
     ):
         grid.append({
             'min_surprise': float(min_surprise),
             'max_gap': float(max_gap),
             'pre_earnings_change': float(pre_change),
+            'stop_loss': float(stop_loss),
             'position_size': float(position_size),
         })
     return grid
@@ -131,6 +134,7 @@ def run_backtest_period(
         min_surprise_percent=params['min_surprise'],
         max_gap_percent=params['max_gap'],
         pre_earnings_change=params['pre_earnings_change'],
+        stop_loss=params['stop_loss'],
         position_size=params['position_size'],
         use_fmp_data=use_fmp_data,
         target_symbols=set(target_symbols) if target_symbols else None,
@@ -265,6 +269,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--pre-earnings-change', type=parse_float_list,
                         default=[DEFAULTS.pre_earnings_change],
                         help='Comma-separated minimum pre-earnings change percentages.')
+    parser.add_argument('--stop-loss', type=parse_float_list,
+                        default=[DEFAULTS.stop_loss],
+                        help='Comma-separated stop-loss percentages.')
     parser.add_argument('--position-size', type=parse_float_list,
                         default=[DEFAULTS.position_size],
                         help='Comma-separated position size percentages.')
@@ -290,6 +297,7 @@ def main() -> int:
         min_surprises=args.min_surprise,
         max_gaps=args.max_gap,
         pre_earnings_changes=args.pre_earnings_change,
+        stop_losses=args.stop_loss,
         position_sizes=args.position_size,
     )
     if args.limit and args.limit > 0:
@@ -330,7 +338,8 @@ def main() -> int:
             f"avg_return={top['avg_return_pct']} "
             f"max_dd={top['max_drawdown_pct']} "
             f"params={{min_surprise={top['min_surprise']}, max_gap={top['max_gap']}, "
-            f"pre_change={top['pre_earnings_change']}, position_size={top['position_size']}}}"
+            f"pre_change={top['pre_earnings_change']}, stop_loss={top['stop_loss']}, "
+            f"position_size={top['position_size']}}}"
         )
     return 0
 
