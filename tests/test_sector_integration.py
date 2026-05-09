@@ -5,10 +5,13 @@
 
 import sys
 import os
+import pytest
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import pandas as pd
 from src.data_fetcher import DataFetcher
 from src.analysis_engine import AnalysisEngine
+
+pytestmark = pytest.mark.live_api
 
 def test_sector_integration():
     """セクター情報統合のテスト"""

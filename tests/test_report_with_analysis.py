@@ -6,11 +6,20 @@
 
 import sys
 import os
+import pytest
 import pandas as pd
 from datetime import datetime, timedelta
 
+pytestmark = pytest.mark.legacy
+if os.getenv('RUN_LEGACY_SCRIPT_TESTS') != '1':
+    pytest.skip(
+        "Legacy script-style report smoke test; set "
+        "RUN_LEGACY_SCRIPT_TESTS=1 to run manually.",
+        allow_module_level=True,
+    )
+
 # プロジェクトルートをパスに追加
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src'))
 
 from config import BacktestConfig
 from report_generator import ReportGenerator

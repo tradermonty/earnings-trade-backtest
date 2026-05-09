@@ -5,6 +5,15 @@ import numpy as np
 from datetime import datetime, timedelta
 import sys
 import os
+import pytest
+
+pytestmark = pytest.mark.legacy
+pytest.skip(
+    "Legacy tests target the removed root-level earnings_backtest module; "
+    "current coverage lives in tests/test_refactored_backtest.py and "
+    "component-level tests.",
+    allow_module_level=True,
+)
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from earnings_backtest import EarningsBacktest

@@ -5,10 +5,19 @@ earnings-calendar API テストスクリプト
 
 import os
 import requests
+import pytest
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 
 load_dotenv()
+
+pytestmark = pytest.mark.live_api
+if os.getenv('RUN_LIVE_API_TESTS') != '1' or not os.getenv('FMP_API_KEY'):
+    pytest.skip(
+        "Live FMP earnings-calendar smoke test; set RUN_LIVE_API_TESTS=1 "
+        "and FMP_API_KEY to run.",
+        allow_module_level=True,
+    )
 
 api_key = os.getenv('FMP_API_KEY')
 print('=== earnings-calendar API 詳細テスト ===')

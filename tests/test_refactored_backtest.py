@@ -9,7 +9,7 @@ import os
 # srcディレクトリをパスに追加
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src'))
 
-from src.config import BacktestConfig
+from src.config import BacktestConfig, DEFAULTS
 from src.main import EarningsBacktest
 from src.data_fetcher import DataFetcher
 from src.data_filter import DataFilter
@@ -223,7 +223,9 @@ class TestEarningsBacktest(unittest.TestCase):
         """テスト用のEarningsBacktestインスタンスを作成"""
         config = BacktestConfig(
             start_date='2024-01-01',
-            end_date='2024-01-31'
+            end_date='2024-01-31',
+            target_symbols={'AAPL', 'MSFT'},
+            use_fmp_data=False,
         )
         
         with patch.object(DataFetcher, 'get_sp500_symbols', return_value=['AAPL', 'MSFT']):
@@ -245,7 +247,7 @@ class TestEarningsBacktest(unittest.TestCase):
         self.assertEqual(config_dict['start_date'], '2024-01-01')
         self.assertEqual(config_dict['end_date'], '2024-01-31')
         self.assertEqual(config_dict['initial_capital'], 100000)
-        self.assertEqual(config_dict['position_size'], 10)
+        self.assertEqual(config_dict['position_size'], DEFAULTS.position_size)
     
     @patch.object(DataFetcher, 'get_earnings_data')
     @patch.object(DataFilter, 'filter_earnings_data')
@@ -345,7 +347,9 @@ class TestIntegration(unittest.TestCase):
         # バックテストの実行
         config = BacktestConfig(
             start_date='2024-01-01',
-            end_date='2024-01-31'
+            end_date='2024-01-31',
+            target_symbols={'AAPL', 'MSFT', 'TEST'},
+            use_fmp_data=False,
         )
         
         backtest = EarningsBacktest(config)

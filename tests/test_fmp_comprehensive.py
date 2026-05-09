@@ -9,6 +9,15 @@ import time
 import os
 import sys
 from datetime import datetime
+import pytest
+
+pytestmark = pytest.mark.live_api
+if os.getenv('RUN_LIVE_API_TESTS') != '1' or not os.getenv('FMP_API_KEY'):
+    pytest.skip(
+        "Live FMP comprehensive script; set RUN_LIVE_API_TESTS=1 and "
+        "FMP_API_KEY to run manually.",
+        allow_module_level=True,
+    )
 
 # プロジェクトのルートディレクトリをパスに追加
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

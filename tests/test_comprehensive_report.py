@@ -6,6 +6,15 @@
 import sys
 import os
 import pandas as pd
+import pytest
+
+pytestmark = pytest.mark.legacy
+if os.getenv('RUN_LEGACY_SCRIPT_TESTS') != '1':
+    pytest.skip(
+        "Legacy report smoke test depends on local reports/*.csv; set "
+        "RUN_LEGACY_SCRIPT_TESTS=1 to run manually.",
+        allow_module_level=True,
+    )
 
 # プロジェクトのルートディレクトリをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

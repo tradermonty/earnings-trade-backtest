@@ -84,6 +84,22 @@ class TestRealisticIntegration(unittest.TestCase):
             sectors = ['Technology', 'Healthcare', 'Financials', 'Consumer Discretionary', 
                       'Industrials', 'Communication Services', 'Energy']
             sector = np.random.choice(sectors, p=[0.4, 0.15, 0.15, 0.1, 0.1, 0.05, 0.05])
+            market_cap_categories = [
+                "Mega Cap ($200B+)",
+                "Large Cap ($10B-$200B)",
+                "Mid Cap ($2B-$10B)",
+                "Small Cap ($300M-$2B)",
+            ]
+            market_cap_category = np.random.choice(
+                market_cap_categories,
+                p=[0.35, 0.4, 0.2, 0.05],
+            )
+            if entry_price > 100:
+                price_range_category = "High Price (>$100)"
+            elif entry_price >= 30:
+                price_range_category = "Mid Price ($30-100)"
+            else:
+                price_range_category = "Low Price (<$30)"
             
             trades_data.append({
                 'ticker': realistic_tickers[i],
@@ -94,10 +110,13 @@ class TestRealisticIntegration(unittest.TestCase):
                 'shares': shares,
                 'pnl': round(pnl, 2),
                 'pnl_rate': round(return_rate, 2),
+                'surprise_rate': round(np.random.uniform(5, 80), 2),
                 'holding_period': holding_days,
                 'exit_reason': exit_reason,
                 'sector': sector,
-                'industry': f'{sector} Industry {i%3 + 1}'
+                'industry': f'{sector} Industry {i%3 + 1}',
+                'market_cap_category': market_cap_category,
+                'price_range_category': price_range_category,
             })
         
         return pd.DataFrame(trades_data)
@@ -286,9 +305,9 @@ class TestRealisticIntegration(unittest.TestCase):
             mock_response.json.return_value = [{'eps': 2.5, 'estimate': 2.0}]
             mock_get.return_value = mock_response
             
-            # _add_eps_infoメソッドを直接テスト
+            # _enrich_trade_dataメソッドを直接テスト
             print("EPS情報とテクニカル指標を計算中...")
-            enhanced_df = self.analysis_engine._add_eps_info(self.realistic_trades_df)
+            enhanced_df = self.analysis_engine._enrich_trade_data(self.realistic_trades_df)
             
             # データの分布を検証
             print("\n=== 計算結果の分布検証 ===")
@@ -373,7 +392,12 @@ class TestRealisticIntegration(unittest.TestCase):
                 if chart_name == 'pre_earnings_performance':
                     expected_categories = ['<-20%', '-20~-10%', '-10~0%', '0~10%', '10~20%', '>20%']
                 elif chart_name == 'volume_trend':
-                    expected_categories = ['1.0-1.5x', '1.5-2.0x', '2.0-3.0x', '3.0-4.0x', '4.0x+']
+                    expected_categories = [
+                        'Neutral (-20% to 20%)',
+                        'Moderate Increase (20-50%)',
+                        'Large Increase (50-100%)',
+                        'Very Large Increase (>100%)',
+                    ]
                 elif chart_name == 'gap_performance':
                     expected_categories = ['Negative', '0-2%', '2-5%', '5-10%', '10%+']
                 else:
