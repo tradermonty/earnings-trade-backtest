@@ -165,12 +165,13 @@ trailing_stop / stop_loss / max_holding.
   `pre_earnings_change`, and `position_size` across 2024 / 2025 / 2026 YTD
   jointly. Rank by worst-period return first, not by the best single year.
 - Investigate 2025 specifically: why did stop_loss exits more than
-  quadruple (6 → 28) while trailing_stop exits dropped (68 → 60)?
-  Likely root cause: lower follow-through after positive earnings →
-  more positions hit the 10% stop before MA21 catches up.
-- Consider stratifying by sector to see whether 2025 underperformance
-  concentrates in specific groups (e.g. small-cap vs large-cap, growth
-  vs value).
+  quadruple (6 → 28) while trailing_stop exits dropped (68 → 60). Use
+  `scripts/analyze_regime_diagnostics.py` to regenerate exit-reason,
+  month, market-cap, and price-range breakdowns from existing trade CSVs.
+- Consider stratifying by sector when the trade CSV contains a `sector`
+  column. Current default reports reliably expose `market_cap_category`
+  and `price_range_category`; the diagnostics script includes `sector`
+  automatically when present.
 - Decide: ship the strategy as regime-dependent (with documented
   drawdown years) or seek a more robust variant. The 2026 YTD recovery
   argues for "regime-dependent but viable", not "broken".
