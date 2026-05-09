@@ -332,6 +332,46 @@ class TestExecutePending:
         assert pending[0]['submitted_client_order_id']
         assert pending[0]['submitted_shares'] > 0
 
+    def test_pending_exit_submission_is_not_resubmitted_and_blocks_reentry(self, tmp_data_dir):
+        """In-flight exit orders are reconciled by reconcile_pending_orders, not resubmitted."""
+        import scripts.paper_auto_entry as mod
+
+        with open(os.path.join(tmp_data_dir, 'pending_exits.json'), 'w') as f:
+            json.dump([{
+                'symbol': 'WAIT',
+                'shares': 10,
+                'reason': 'stop_loss',
+                'submission_status': 'pending',
+                'submitted_client_order_id': 'cid_wait_exit',
+            }], f)
+        with open(os.path.join(tmp_data_dir, 'pending_entries.json'), 'w') as f:
+            json.dump([{
+                'symbol': 'WAIT',
+                'timing': None,
+                'date': '2026-03-03',
+                'entry_price_est': 40.0,
+                'score': 70,
+            }], f)
+
+        mock_mgr = Mock()
+        mock_mgr.get_positions.return_value = []
+        mock_mgr.get_account_summary.return_value = {
+            'portfolio_value': 100000,
+            'buying_power': 100000,
+        }
+
+        result = mod.execute_pending(
+            dry_run=False,
+            alpaca_manager=mock_mgr,
+            today_str='2026-03-03',
+            state_dir=tmp_data_dir,
+        )
+
+        mock_mgr.submit_market_order.assert_not_called()
+        assert result['exits_planned'] == []
+        assert result['entries_placed'] == []
+        assert result['entries_skipped'][0]['reason'] == 'already_pending_exit'
+
 
 class TestScreenAndSave:
 

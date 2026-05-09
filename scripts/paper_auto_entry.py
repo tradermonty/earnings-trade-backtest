@@ -415,10 +415,14 @@ def execute_pending(
 
     # ===== Phase 1: Plan =====
     with lock:
-        pending_exits = load_json(paths.pending_exits)
+        pending_exits_all = load_json(paths.pending_exits)
         pending_entries_all = load_json(paths.pending_entries)
         trades = load_json(paths.trades)
 
+    pending_exits = [
+        e for e in pending_exits_all
+        if e.get('submission_status') != 'pending'
+    ]
     pending_entries = [
         e for e in pending_entries_all
         if e.get('submission_status') != 'pending'
@@ -465,7 +469,7 @@ def execute_pending(
 
     # ===== Phase 4: Filter + verify + top-N entries =====
     forbidden_today = (
-        {e.get('symbol') for e in pending_exits}
+        {e.get('symbol') for e in pending_exits_all}
         | {er['exit'].get('symbol') for er in exit_results}
     )
     entries_skipped: List[Dict[str, Any]] = []

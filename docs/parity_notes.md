@@ -268,14 +268,13 @@ Dry-run path replaces `AlpacaOrderManager` with `DryRunAccount`
 - `get_order_by_client_id` always returns `None` (no broker; the dry-run
   path never reaches the `pending_unfilled` reconciliation branch).
 
-Dry-run cron does **not** require `ALPACA_API_KEY_PAPER` once
-`execute_pending` is rewired to construct `DryRunAccount` for dry-run.
+Dry-run cron does **not** require `ALPACA_API_KEY_PAPER`: `execute_pending`
+constructs `DryRunAccount` when `dry_run=True` and no explicit
+`alpaca_manager` is injected.
 
-**Status (2026-05-09):** `DryRunAccount` is implemented and unit-tested
-(`tests/test_dry_run_account.py`, 12 PASS), but `execute_pending`'s
-existing mainline still constructs `AlpacaOrderManager(account_type='paper')`
-unconditionally and early-returns on `--dry-run` before any order placement.
-Routing through `DryRunAccount` is part of the Phase 3c-body work.
+**Status (2026-05-09):** `DryRunAccount` is implemented, routed through
+`execute_pending`, and covered by `tests/test_dry_run_account.py` plus
+`tests/test_paper_auto_entry.py`.
 
 ### 4.3 Phase ordering in `execute_pending`
 
@@ -283,17 +282,13 @@ Strict order is exit → re-evaluate account → entry. Reversing it would
 compute `margin_room` and `risk_gate` against the pre-exit portfolio and
 cause spurious entry rejections.
 
-**Status (2026-05-09):** the existing `execute_pending` already follows
-exit-first ordering for the live path. The 6-phase rev-12 reorganization
-(structured return, strict-fill via `_submit_with_reconciliation`,
-DryRunAccount routing, state-dir injection, top-N post-stage-2) is
-**Phase 3c work in progress**. Helpers (`_is_filled`, `_skip_entry`,
-`_skip_exit`, `_submit_with_reconciliation` with polling/partial-fill)
-are implemented and unit-tested but are not yet called from the mainline
-`execute_pending` body. Until that wiring lands, the live path retains
-its current behavior (`fill_price or prev_close` fallback at
-`paper_auto_entry.py:543`, simple state writes), and dry-run still early-
-returns at the existing point in the function.
+**Status (2026-05-09):** `execute_pending` now uses the 6-phase structure:
+short-lock plan, exit placement, post-exit account refresh, entry filtering,
+entry placement, and short-lock state update. The body returns structured
+`entries_*` / `exits_*` records, uses strict-fill reconciliation, persists
+`submission_status='pending'` metadata for late fills, supports injected
+`state_dir` / `data_fetcher` / `alpaca_manager`, and routes dry-run through
+`DryRunAccount`.
 
 ### 4.4 Same-day re-entry
 
@@ -307,20 +302,19 @@ on date D cannot re-enter on date D. Implemented via a single
 Records with `submission_status=='pending'` (awaiting `reconcile_pending_orders`)
 are exempt and require manual triage.
 
-### 4.6 Reconcile coverage by skip outcome (design spec, not yet wired)
+### 4.6 Reconcile coverage by skip outcome
 
-The reconcile policy below is **the design contract**, not the current
-behavior. As of 2026-05-09 `scripts/reconcile_pending_orders.py` runs in
-two modes:
+As of 2026-05-09 `scripts/reconcile_pending_orders.py` runs in two modes:
 
 - **Dry-run** (`--dry-run`): scans state, reports the count of records
   with `submission_status == 'pending'`, exits 0. Working as designed.
-- **Live** (no flag): prints `"not yet wired"` and exits 0. The TODO at
-  `scripts/reconcile_pending_orders.py:96` marks the spot for the live
-  branch. It depends on Phase 3c-body annotating pending records with
-  `submission_status='pending'` after polling exhaustion.
+- **Live** (no flag): scans `pending_entries.json` and
+  `pending_exits.json` for `submission_status == 'pending'`, looks up the
+  submitted `client_order_id`, applies confirmed fills to `paper_trades.json`,
+  removes rejected/cancelled records, and logs still-unresolved orders to
+  `logs/paper_dryrun/orders_unresolved_{today}.log`.
 
-When the live branch is implemented (Phase 3c follow-up), the policy is:
+The live policy is:
 
 | Outcome | Pending retained? | Auto-reconciled? |
 |---|---|---|
