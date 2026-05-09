@@ -3,7 +3,7 @@
 """
 
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Iterable
 import logging
 
 from .config import BacktestConfig, TextConfig
@@ -19,9 +19,19 @@ from .report_generator import ReportGenerator
 class EarningsBacktest:
     """earnings-based swing trading backtest system"""
     
-    def __init__(self, config: BacktestConfig):
+    def __init__(
+        self,
+        config: BacktestConfig,
+        *,
+        data_fetcher: Optional[Any] = None,
+        target_symbols: Optional[Iterable[str]] = None,
+    ):
         """EarningsBacktestの初期化"""
         self.config = config
+        self._injected_data_fetcher = data_fetcher
+        self._injected_target_symbols = (
+            set(target_symbols) if target_symbols is not None else None
+        )
         self._validate_dates()
         self._initialize_components()
         
@@ -41,13 +51,19 @@ class EarningsBacktest:
     def _initialize_components(self):
         """各コンポーネントの初期化"""
         # データ取得コンポーネント
-        self.data_fetcher = DataFetcher(use_fmp=self.config.use_fmp_data)
+        self.data_fetcher = (
+            self._injected_data_fetcher
+            or DataFetcher(use_fmp=self.config.use_fmp_data)
+        )
         
         # API keyをデータフェッチャーから取得
         self.api_key = self.data_fetcher.api_key
         
         # 銘柄リストの取得
-        if self.config.target_symbols:
+        if self._injected_target_symbols is not None:
+            self.target_symbols = set(self._injected_target_symbols)
+            self._universe_source = 'injected'
+        elif self.config.target_symbols:
             self.target_symbols = set(self.config.target_symbols)
             self._universe_source = 'custom'
         else:
@@ -160,7 +176,8 @@ class EarningsBacktest:
             self.metrics = self.metrics_calculator.calculate_metrics(self.trades)
             
             # 5. レポートの生成
-            self._generate_reports()
+            if self.config.generate_reports:
+                self._generate_reports()
             
             return {
                 'trades': self.trades,
@@ -271,6 +288,7 @@ def create_backtest_from_args(args) -> EarningsBacktest:
         min_profit_margin=args.min_profit_margin,
         max_gap_percent=args.max_gap,
         min_surprise_percent=args.min_surprise,
+        generate_reports=not getattr(args, 'no_reports', False),
 
         # 動的ポジションサイズ設定
         dynamic_position_pattern=getattr(args, 'dynamic_position', None),

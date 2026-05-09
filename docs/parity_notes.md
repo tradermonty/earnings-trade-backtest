@@ -161,9 +161,9 @@ trailing_stop / stop_loss / max_holding.
 
 #### Action items (next session)
 
-- Parameter sweeps (`min_surprise`, `max_gap`, `pre_earnings_change`,
-  `position_size`) against 2024 / 2025 / 2026 YTD jointly to find a
-  setting that performs robustly across all three regimes.
+- Run `scripts/parameter_sweep.py` for `min_surprise`, `max_gap`,
+  `pre_earnings_change`, and `position_size` across 2024 / 2025 / 2026 YTD
+  jointly. Rank by worst-period return first, not by the best single year.
 - Investigate 2025 specifically: why did stop_loss exits more than
   quadruple (6 → 28) while trailing_stop exits dropped (68 → 60)?
   Likely root cause: lower follow-through after positive earnings →
