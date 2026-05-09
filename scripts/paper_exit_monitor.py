@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.join(project_root, 'src'))
 
 from filelock import FileLock
 from src.data_fetcher import DataFetcher
+from src.config import DEFAULTS
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +44,7 @@ TRADES_FILE = os.path.join(DATA_DIR, 'paper_trades.json')
 PENDING_EXITS_FILE = os.path.join(DATA_DIR, 'pending_exits.json')
 LOCK_FILE = os.path.join(DATA_DIR, '.paper_state.lock')
 
-# Strategy parameters (match backtest defaults)
-STOP_LOSS_PCT = 10.0
-TRAIL_STOP_MA = 21
-MAX_HOLDING_DAYS = 90
-PARTIAL_PROFIT_THRESHOLD = 6.0  # +6%
+# Strategy parameters sourced from DEFAULTS (src/config.py); use DEFAULTS.* directly.
 
 
 def load_json(path):
@@ -96,7 +93,7 @@ def check_exit_conditions(
     entry_date = trade['entry_date']
     entry_price = trade['entry_price']
     remaining_shares = trade['remaining_shares']
-    stop_loss_price = trade.get('stop_loss_price', entry_price * (1 - STOP_LOSS_PCT / 100))
+    stop_loss_price = trade.get('stop_loss_price', entry_price * (1 - DEFAULTS.stop_loss / 100))
 
     # Fetch historical data
     start = (datetime.strptime(entry_date, '%Y-%m-%d') - timedelta(days=60)).strftime('%Y-%m-%d')
@@ -125,7 +122,7 @@ def check_exit_conditions(
     days_held = (datetime.strptime(today, '%Y-%m-%d') - datetime.strptime(entry_date, '%Y-%m-%d')).days
 
     # --- Priority 1: Max holding days ---
-    if days_held >= MAX_HOLDING_DAYS:
+    if days_held >= DEFAULTS.max_holding_days:
         return {
             'symbol': symbol,
             'shares': remaining_shares,
@@ -148,9 +145,9 @@ def check_exit_conditions(
     # --- Priority 3: Trailing stop (Close < MA21) ---
     # Only from day 2 onward (trade_executor checks entry_idx + 1)
     if days_held > 0:
-        ma_col = f'MA{TRAIL_STOP_MA}'
+        ma_col = f'MA{DEFAULTS.trail_stop_ma}'
         if ma_col not in stock_data.columns:
-            stock_data[ma_col] = stock_data['Close'].rolling(TRAIL_STOP_MA).mean()
+            stock_data[ma_col] = stock_data['Close'].rolling(DEFAULTS.trail_stop_ma).mean()
         ma_value = stock_data.loc[today].get(ma_col) if today in stock_data.index else None
         if ma_value is not None and pd.notna(ma_value) and today_close < ma_value:
             return {
@@ -164,7 +161,7 @@ def check_exit_conditions(
     # --- Priority 4: Partial profit (day 1 only, +6%) ---
     if days_held == 0:
         profit_pct = (today_close - entry_price) / entry_price * 100
-        if profit_pct >= PARTIAL_PROFIT_THRESHOLD:
+        if profit_pct >= DEFAULTS.partial_profit_threshold:
             half = math.floor(remaining_shares / 2)
             if half > 0:
                 return {

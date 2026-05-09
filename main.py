@@ -14,6 +14,7 @@ import logging
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.main import create_backtest_from_args
+from src.config import DEFAULTS
 
 
 def parse_arguments():
@@ -32,28 +33,28 @@ def parse_arguments():
     parser.add_argument('--end_date', type=str, default=default_end_date,
                         help='End date (YYYY-MM-DD format)')
     
-    # トレードパラメータ
-    parser.add_argument('--stop_loss', type=float, default=10.0,
+    # トレードパラメータ (defaults read from DEFAULTS in src/config.py)
+    parser.add_argument('--stop_loss', type=float, default=DEFAULTS.stop_loss,
                         help='Stop loss percentage')
-    parser.add_argument('--trail_stop_ma', type=int, default=21,
+    parser.add_argument('--trail_stop_ma', type=int, default=DEFAULTS.trail_stop_ma,
                         help='Trailing stop moving average period')
-    parser.add_argument('--max_holding_days', type=int, default=90,
+    parser.add_argument('--max_holding_days', type=int, default=DEFAULTS.max_holding_days,
                         help='Maximum holding period in days')
-    parser.add_argument('--initial_capital', type=float, default=100000.0,
+    parser.add_argument('--initial_capital', type=float, default=DEFAULTS.initial_capital,
                         help='Initial capital amount')
-    parser.add_argument('--position_size', type=float, default=15.0,
+    parser.add_argument('--position_size', type=float, default=DEFAULTS.position_size,
                         help='Position size as percentage of capital')
-    parser.add_argument('--slippage', type=float, default=0.3,
+    parser.add_argument('--slippage', type=float, default=DEFAULTS.slippage,
                         help='Slippage percentage')
-    parser.add_argument('--risk_limit', type=float, default=6.0,
+    parser.add_argument('--risk_limit', type=float, default=DEFAULTS.risk_limit,
                         help='Risk limit percentage for stopping new trades')
-    parser.add_argument('--pre_earnings_change', type=float, default=0.0,
+    parser.add_argument('--pre_earnings_change', type=float, default=DEFAULTS.pre_earnings_change,
                         help='Minimum price change percentage 20 days before earnings')
-    parser.add_argument('--max_gap', type=float, default=10.0,
+    parser.add_argument('--max_gap', type=float, default=DEFAULTS.max_gap_percent,
                         help='Maximum allowable opening gap percentage (stocks with larger gaps will be excluded)')
-    parser.add_argument('--min_surprise', type=float, default=5.0,
-                        help='Minimum EPS surprise percentage (default: 5.0%%)')
-    parser.add_argument('--margin_ratio', type=float, default=1.5,
+    parser.add_argument('--min_surprise', type=float, default=DEFAULTS.min_surprise_percent,
+                        help='Minimum EPS surprise percentage')
+    parser.add_argument('--margin_ratio', type=float, default=DEFAULTS.margin_ratio,
                         help='Maximum position to capital ratio (default: 1.5x leverage)')
     
     # トレード設定
@@ -80,15 +81,15 @@ def parse_arguments():
                         help='Use EODHD instead of default FMP data source (requires EODHD_API_KEY)')
     
     # 時価総額ベースフィルタリング (デフォルト: 無効)
-    parser.add_argument('--min_market_cap', type=float, default=5.0,
-                        help='Minimum market cap in billions for mid/small cap filtering (default: 1.0B)')
+    parser.add_argument('--min_market_cap', type=float, default=DEFAULTS.min_market_cap / 1e9,
+                        help='Minimum market cap in billions for mid/small cap filtering')
     parser.add_argument('--max_market_cap', type=float, default=0.0,
                         help='Maximum market cap in billions (0 または未指定で上限なし)')
 
     # FMPスクリーナー追加条件
-    parser.add_argument('--screener_price_min', type=float, default=30.0,
-                        help='Minimum stock price for FMP screener (default: 30)')
-    # Volume filtering is hardcoded at 200K in DataFilter._check_final_conditions()
+    parser.add_argument('--screener_price_min', type=float, default=DEFAULTS.screener_price_min,
+                        help='Minimum stock price for FMP screener')
+    # Volume filter: see DEFAULTS.min_volume_20d (used in DataFilter._check_final_conditions)
     # Fundamental filters
     parser.add_argument('--max_ps_ratio', type=float, default=None,
                         help='Maximum P/S ratio for screener (optional)')
