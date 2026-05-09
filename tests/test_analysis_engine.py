@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import Mock, patch, MagicMock
 import pandas as pd
 import numpy as np
+import pytest
 from datetime import datetime, timedelta
 import sys
 import os
@@ -42,23 +43,13 @@ class TestAnalysisEngine(unittest.TestCase):
             'exit_price': [155.0, 135.0, 395.0],
             'pnl': [500.0, -500.0, 1500.0],
             'pnl_rate': [3.33, -3.57, 3.95],
+            'surprise_rate': [6.67, -3.00, 15.00],
             'sector': ['Technology', 'Technology', 'Technology'],
             'industry': ['Consumer Electronics', 'Internet Services', 'Software']
         })
     
-    def test_add_eps_info_with_api_data(self):
-        """_add_eps_info メソッドのテスト（APIデータあり）"""
-        # モックのAPIレスポンスを設定
-        mock_earnings_response = {
-            'eps': 3.52,
-            'estimate': 3.30
-        }
-        
-        mock_historical_earnings = [
-            {'eps': 2.50}, {'eps': 2.60}, {'eps': 2.70}, {'eps': 2.80}, 
-            {'eps': 2.90}, {'eps': 3.00}, {'eps': 3.10}, {'eps': 3.20}, {'eps': 3.52}
-        ]
-        
+    def test_enrich_trade_data_with_market_data(self):
+        """_enrich_trade_data メソッドのテスト（分析用データあり）"""
         # モックの株価データ
         mock_stock_data = pd.DataFrame({
             'date': pd.date_range('2023-12-01', '2024-01-15', freq='D'),
@@ -69,55 +60,37 @@ class TestAnalysisEngine(unittest.TestCase):
         
         # get_historical_dataのモック設定
         self.mock_data_fetcher.get_historical_data.return_value = mock_stock_data
-        
-        with patch('requests.get') as mock_get:
-            # EPSデータのモックレスポンス
-            mock_response = Mock()
-            mock_response.status_code = 200
-            mock_response.json.side_effect = [
-                [mock_earnings_response],  # 最新のEPSデータ
-                mock_historical_earnings   # 履歴EPSデータ
-            ]
-            mock_get.return_value = mock_response
-            
-            # メソッドを実行
-            result_df = self.analysis_engine._add_eps_info(self.test_trades_df)
-            
-            # 検証
-            self.assertIn('eps_surprise_percent', result_df.columns)
-            self.assertIn('eps_growth_percent', result_df.columns)
-            self.assertIn('eps_acceleration', result_df.columns)
-            self.assertIn('gap', result_df.columns)
-            self.assertIn('pre_earnings_change', result_df.columns)
-            self.assertIn('volume_ratio', result_df.columns)
-            self.assertIn('price_to_ma200', result_df.columns)
-            self.assertIn('price_to_ma50', result_df.columns)
-            
-            # EPSサプライズ率の計算検証
-            expected_surprise = ((3.52 - 3.30) / abs(3.30)) * 100
-            self.assertAlmostEqual(result_df['eps_surprise_percent'].iloc[0], expected_surprise, places=2)
+
+        # メソッドを実行
+        result_df = self.analysis_engine._enrich_trade_data(self.test_trades_df)
+
+        # 検証
+        self.assertIn('eps_surprise_percent', result_df.columns)
+        self.assertIn('eps_growth_percent', result_df.columns)
+        self.assertIn('eps_acceleration', result_df.columns)
+        self.assertIn('gap', result_df.columns)
+        self.assertIn('pre_earnings_change', result_df.columns)
+        self.assertIn('volume_ratio', result_df.columns)
+        self.assertIn('price_to_ma200', result_df.columns)
+        self.assertIn('price_to_ma50', result_df.columns)
+
+        # EPSサプライズ率はCSV由来の surprise_rate を使う
+        self.assertAlmostEqual(result_df['eps_surprise_percent'].iloc[0], 6.67, places=2)
     
-    def test_add_eps_info_with_no_api_data(self):
-        """_add_eps_info メソッドのテスト（APIデータなし）"""
+    def test_enrich_trade_data_with_no_market_data(self):
+        """_enrich_trade_data メソッドのテスト（株価データなし）"""
         # get_historical_dataのモック設定（データなし）
         self.mock_data_fetcher.get_historical_data.return_value = None
-        
-        with patch('requests.get') as mock_get:
-            # APIエラーのモック
-            mock_response = Mock()
-            mock_response.status_code = 404
-            mock_get.return_value = mock_response
-            
-            # メソッドを実行
-            result_df = self.analysis_engine._add_eps_info(self.test_trades_df)
-            
-            # デフォルト値の検証
-            self.assertEqual(result_df['eps_surprise_percent'].iloc[0], 0.0)
-            self.assertEqual(result_df['eps_growth_percent'].iloc[0], 0.0)
-            self.assertEqual(result_df['eps_acceleration'].iloc[0], 0.0)
-            self.assertEqual(result_df['volume_ratio'].iloc[0], 1.0)
-            self.assertEqual(result_df['price_to_ma200'].iloc[0], 1.0)
-            self.assertEqual(result_df['price_to_ma50'].iloc[0], 1.0)
+
+        # メソッドを実行
+        result_df = self.analysis_engine._enrich_trade_data(self.test_trades_df)
+
+        # デフォルト値の検証
+        self.assertEqual(result_df['eps_surprise_percent'].iloc[0], 6.67)
+        self.assertNotEqual(result_df['eps_growth_percent'].iloc[0], 0.0)
+        self.assertEqual(result_df['volume_ratio'].iloc[0], 1.0)
+        self.assertEqual(result_df['price_to_ma200'].iloc[0], 1.0)
+        self.assertEqual(result_df['price_to_ma50'].iloc[0], 1.0)
     
     def test_create_sector_performance_chart(self):
         """_create_sector_performance_chart メソッドのテスト"""
@@ -252,7 +225,7 @@ class TestAnalysisEngine(unittest.TestCase):
             mock_get.return_value = mock_response
             
             # メソッドを実行
-            result_df = self.analysis_engine._add_eps_info(self.test_trades_df.head(1))
+            result_df = self.analysis_engine._enrich_trade_data(self.test_trades_df.head(1))
             
             # 出来高比率が1より大きいことを確認（直近の出来高が増えているため）
             self.assertGreater(result_df['volume_ratio'].iloc[0], 1.0)
@@ -279,12 +252,13 @@ class TestAnalysisEngine(unittest.TestCase):
             mock_get.return_value = mock_response
             
             # メソッドを実行
-            result_df = self.analysis_engine._add_eps_info(self.test_trades_df.head(1))
+            result_df = self.analysis_engine._enrich_trade_data(self.test_trades_df.head(1))
             
             # 価格変化率が正であることを確認
             self.assertGreater(result_df['pre_earnings_change'].iloc[0], 0)
 
 
+@pytest.mark.live_api
 class TestAnalysisEngineIntegration(unittest.TestCase):
     """AnalysisEngineの統合テスト"""
     

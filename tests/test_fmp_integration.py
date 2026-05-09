@@ -7,6 +7,7 @@ FMP Data Fetcher Integration Tests
 import unittest
 import os
 import time
+import pytest
 from datetime import datetime, timedelta
 import sys
 from dotenv import load_dotenv
@@ -19,6 +20,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.fmp_data_fetcher import FMPDataFetcher
 from src.data_fetcher import DataFetcher
+
+pytestmark = pytest.mark.live_api
 
 @unittest.skipUnless(os.getenv('FMP_API_KEY'), "FMP API key required for integration tests")
 class TestFMPIntegration(unittest.TestCase):

@@ -4,10 +4,13 @@
 """
 
 import os
+import pytest
 from dotenv import load_dotenv
 
 # 環境変数の読み込み
 load_dotenv()
+
+pytestmark = pytest.mark.live_api
 
 from src.news_fetcher import NewsFetcher
 from src.earnings_date_validator import EarningsDateValidator

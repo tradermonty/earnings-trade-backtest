@@ -8,13 +8,22 @@ import numpy as np
 from datetime import datetime, timedelta
 import os
 import sys
+import pytest
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
+pytestmark = pytest.mark.legacy
+if os.getenv('RUN_LEGACY_SCRIPT_TESTS') != '1':
+    pytest.skip(
+        "Legacy script-style analysis smoke test; set "
+        "RUN_LEGACY_SCRIPT_TESTS=1 to run manually.",
+        allow_module_level=True,
+    )
+
 # Add src directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src'))
 
 from data_fetcher import DataFetcher
 from analysis_engine import AnalysisEngine

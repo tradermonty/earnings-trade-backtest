@@ -4,10 +4,13 @@ MANH enhanced validation test
 """
 
 import os
+import pytest
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+pytestmark = pytest.mark.live_api
 
 from src.news_fetcher import NewsFetcher
 from src.earnings_date_validator import EarningsDateValidator
