@@ -7,7 +7,7 @@ Modes:
   --screen-bmo    9:00 AM: Screen BMO candidates → save to pending_entries.json
   --screen-amc   16:00:    Screen AMC candidates → save to pending_entries.json
   --execute       9:30 AM: Execute pending exits (sell) then entries (buy)
-  --dry-run       Preview without placing orders or modifying state
+  --dry-run       Use dry-run state and deterministic fills; no broker orders
 
 Usage:
   python scripts/paper_auto_entry.py --screen-bmo
@@ -23,7 +23,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -41,6 +41,11 @@ from src.paper_state import (
     LIVE_STATE_DIR,
     StatePaths,
     get_state_paths,
+)
+from src.filter_utils import (
+    compute_avg_volume_20d,
+    compute_pre_earnings_change,
+    get_prior_bars,
 )
 
 logger = logging.getLogger(__name__)
@@ -330,296 +335,395 @@ def screen_and_save(timing: str, dry_run: bool = False):
 
 # --- Execute Mode ---
 
-def execute_pending(dry_run: bool = False):
-    """Execute pending exits then entries at market open."""
-    today = get_today_str()
+def execute_pending(
+    dry_run: bool = False,
+    *,
+    alpaca_manager: Any = None,
+    data_fetcher: Any = None,
+    today_str: Optional[str] = None,
+    state_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Execute pending exits first, then entries, and persist state atomically.
+
+    The public shape is intentionally injectable so tests, dry-run cron, and
+    live paper trading all exercise the same path. ``dry_run=True`` uses
+    ``DryRunAccount`` and writes to ``data/dryrun`` unless ``state_dir`` is
+    supplied. Existing tests that monkeypatch module-level path constants are
+    still supported when ``state_dir`` is omitted in live mode.
+    """
+    today = today_str or get_today_str()
     print(f"=== Execute Pending Orders ({today}) ===")
 
-    mgr = AlpacaOrderManager(account_type='paper')
-    lock = FileLock(LOCK_FILE, timeout=30)
+    if state_dir is None and not dry_run:
+        paths = StatePaths(DATA_DIR, TRADES_FILE, PENDING_ENTRIES_FILE,
+                           PENDING_EXITS_FILE, LOCK_FILE)
+    else:
+        paths = _resolve_state_paths(state_dir, dry_run)
 
-    # Phase 1: Plan (short lock)
+    from src.data_fetcher import DataFetcher as DF
+    df_for_verify = data_fetcher or DF(use_fmp=True)
+    if alpaca_manager is not None:
+        mgr = alpaca_manager
+    elif dry_run:
+        mgr = DryRunAccount(paths, data_fetcher=df_for_verify, today_str=today)
+    else:
+        mgr = AlpacaOrderManager(account_type='paper')
+
+    lock = FileLock(paths.lock, timeout=30)
+
+    def _entry_key(en: Dict[str, Any]) -> tuple:
+        return (en.get('symbol'), en.get('trade_date') or en.get('date'), en.get('timing'))
+
+    def _entry_date(en: Dict[str, Any]) -> Optional[str]:
+        return en.get('trade_date') or en.get('date')
+
+    def _sort_surprise(en: Dict[str, Any]) -> float:
+        return float(en.get('eps_surprise_percent',
+                            en.get('eps_surprise', en.get('score', 0))) or 0)
+
+    def _cleanup_eligible(reason: str) -> bool:
+        prefixes = (
+            'no_preopen', 'no_history', 'insufficient_history',
+            'gap_out_of_range', 'price_below_min', 'volume_below_min',
+            'pre_change_below_min', 'top_n_cap', 'already_position',
+            'already_pending_exit', 'margin_limit', 'zero_shares',
+            'margin_caps_to_zero',
+        )
+        return any(reason == p or reason.startswith(p) for p in prefixes)
+
+    def _pending_entry_matches(p: Dict[str, Any], en: Dict[str, Any]) -> bool:
+        return _entry_key(p) == _entry_key(en)
+
+    def _pending_exit_matches(p: Dict[str, Any], ex: Dict[str, Any]) -> bool:
+        return (
+            p.get('symbol') == ex.get('symbol')
+            and p.get('reason') == ex.get('reason')
+            and int(p.get('shares', 0) or 0) == int(ex.get('shares', 0) or 0)
+        )
+
+    # ===== Phase 1: Plan =====
     with lock:
-        pending_exits = load_json(PENDING_EXITS_FILE)
-        pending_entries = load_json(PENDING_ENTRIES_FILE)
-        trades = load_json(TRADES_FILE)
+        pending_exits = load_json(paths.pending_exits)
+        pending_entries_all = load_json(paths.pending_entries)
+        trades = load_json(paths.trades)
 
-    exit_symbols = {e['symbol'] for e in pending_exits}
-
-    # Remove entries for symbols being exited
-    entry_plan = [e for e in pending_entries if e['symbol'] not in exit_symbols]
-    removed = len(pending_entries) - len(entry_plan)
-    if removed > 0:
-        print(f"Removed {removed} entries for symbols with pending exits")
-
-    # Check existing positions to avoid duplicates
-    current_positions = {p['symbol'] for p in mgr.get_positions()}
-    entry_plan = [e for e in entry_plan if e['symbol'] not in current_positions
-                  or e['symbol'] in exit_symbols]  # allow re-entry after exit only if also exiting
+    pending_entries = [
+        e for e in pending_entries_all
+        if e.get('submission_status') != 'pending'
+        and (e.get('trade_date') is None or e.get('trade_date') == today)
+    ]
 
     print(f"Exit plan: {len(pending_exits)} sells")
-    print(f"Entry plan: {len(entry_plan)} buys")
 
-    if dry_run:
-        for ex in pending_exits:
-            print(f"  [DRY] SELL {ex['symbol']} {ex['shares']} shares ({ex['reason']})")
-        for en in entry_plan:
-            print(f"  [DRY] BUY {en['symbol']} (prev_close=${en['prev_close']:.2f})")
-        print("(dry-run) No orders placed.")
-        return
-
-    # Phase 2a: Execute Exits (no lock)
-    exit_results = []
+    # ===== Phase 2: Place exits (no lock) =====
+    exit_results: List[Dict[str, Any]] = []
     for ex in pending_exits:
+        shares = int(ex.get('shares', 0) or 0)
+        if shares <= 0:
+            exit_results.append({
+                'exit': ex, 'result': {}, 'filled_shares': 0,
+                'outcome': 'rejected', 'skip_reason': 'zero_shares',
+            })
+            continue
         cid = AlpacaOrderManager.make_client_order_id(
-            ex['symbol'], today, f"exit_{ex['reason']}", 'sell'
+            ex['symbol'], today, f"exit_{ex.get('reason', 'unknown')}", 'sell'
         )
-        try:
-            result = mgr.submit_market_order(
-                ex['symbol'], ex['shares'], side='sell', client_order_id=cid
-            )
-            if result.get('status') == 'duplicate':
-                # Reconcile: look up original order to see if it filled
-                existing = mgr.get_order_by_client_id(cid)
-                if existing and existing.get('status') == 'filled':
-                    exit_results.append({'exit': ex, 'result': existing, 'success': True})
-                    print(f"  RECONCILED {ex['symbol']}: prior order filled")
-                else:
-                    exit_results.append({'exit': ex, 'result': result, 'success': False})
-                    print(f"  SKIP {ex['symbol']}: duplicate, prior order status={existing.get('status') if existing else 'unknown'}")
-            else:
-                exit_results.append({'exit': ex, 'result': result, 'success': True})
-                print(f"  SOLD {ex['symbol']} {ex['shares']} shares ({ex['reason']})")
-        except Exception as e:
-            exit_results.append({'exit': ex, 'result': str(e), 'success': False})
-            print(f"  FAILED sell {ex['symbol']}: {e}")
+        ref_price = float(ex.get('trigger_price') or ex.get('entry_price') or 0)
+        result, filled_shares, outcome, skip_reason = _submit_with_reconciliation(
+            mgr, ex['symbol'], shares, 'sell', cid, reference_price=ref_price or 0.01,
+        )
+        exit_results.append({
+            'exit': ex,
+            'cid': cid,
+            'submitted_shares': shares,
+            'submitted_reference_price': ref_price,
+            'result': result,
+            'filled_shares': filled_shares,
+            'outcome': outcome,
+            'skip_reason': skip_reason,
+        })
 
-    # Phase 2b: Re-evaluate account and execute entries (no lock)
+    # ===== Phase 3: Re-evaluate account/positions =====
     account = mgr.get_account_summary()
-    portfolio_value = account['portfolio_value']
+    portfolio_value = float(account['portfolio_value'])
+    positions = mgr.get_positions()
+    current_positions = {p['symbol'] for p in positions}
+    total_position_value = sum(float(p.get('market_value', 0) or 0) for p in positions)
     print(f"\nPost-exit portfolio: ${portfolio_value:,.2f}")
 
-    # Risk gate
-    if not check_risk_gate(trades, portfolio_value):
-        entry_plan = []
+    # ===== Phase 4: Filter + verify + top-N entries =====
+    forbidden_today = (
+        {e.get('symbol') for e in pending_exits}
+        | {er['exit'].get('symbol') for er in exit_results}
+    )
+    entries_skipped: List[Dict[str, Any]] = []
+    survivors: List[Dict[str, Any]] = []
 
-    # Margin check
-    positions = mgr.get_positions()
-    total_position_value = sum(p['market_value'] for p in positions)
-    margin_room = portfolio_value * DEFAULTS.margin_ratio - total_position_value
+    for en in pending_entries:
+        sym = en.get('symbol')
+        if not sym:
+            continue
+        if sym in current_positions:
+            entries_skipped.append(_skip_entry(en, 'already_position'))
+            continue
+        if sym in forbidden_today:
+            entries_skipped.append(_skip_entry(en, 'already_pending_exit'))
+            continue
 
-    # Re-verify AMC candidates at entry time (gap/volume/price)
-    # AMC candidates were screened without trade-date bars;
-    # now that market is open we can check pre-open/open conditions.
-    from src.data_fetcher import DataFetcher as DF
-    df_for_verify = DF(use_fmp=True)
-
-    verified_plan = []
-    skipped_entries = []  # Track skipped candidates for pending cleanup
-    for en in entry_plan:
-        if en.get('timing') in ('amc', 'bmo'):  # both need live re-verification
-            sym = en['symbol']
-            # Verify gap/price/volume using today's actual bar
+        # Legacy tests use timing=None with precomputed prices; keep that path
+        # trusted while live pending entries use timing bmo/amc and are verified.
+        if en.get('timing') in ('amc', 'bmo'):
+            pre_open = df_for_verify.get_preopen_price(sym, today)
+            if pre_open is None:
+                entries_skipped.append(_skip_entry(en, 'no_preopen'))
+                continue
             hist = df_for_verify.get_historical_data(
                 sym,
-                (pd.Timestamp(today) - pd.Timedelta(days=30)).strftime('%Y-%m-%d'),
+                (pd.Timestamp(today) - pd.Timedelta(days=60)).strftime('%Y-%m-%d'),
                 today,
             )
-            if hist is None or hist.empty:
-                print(f"  SKIP {sym}: no price data available")
-                skipped_entries.append(en)
+            prior = get_prior_bars(hist, today)
+            if prior.empty:
+                entries_skipped.append(_skip_entry(en, 'no_history'))
                 continue
+            close_col = 'Close' if 'Close' in prior.columns else 'close'
+            prev_close = float(prior.iloc[-1][close_col])
+            gap = (float(pre_open) - prev_close) / prev_close * 100 if prev_close > 0 else 0
+            avg_volume = compute_avg_volume_20d(hist, today)
+            pre_change = compute_pre_earnings_change(hist, today)
 
-            date_col = 'date'
-            close_col = 'Close' if 'Close' in hist.columns else 'close'
-            open_col = 'Open' if 'Open' in hist.columns else 'open'
-            vol_col = 'Volume' if 'Volume' in hist.columns else 'volume'
-
-            # Check if today's bar actually exists
-            today_rows = hist[hist[date_col] == today]
-            if today_rows.empty:
-                print(f"  SKIP {sym}: today's bar not yet available")
-                skipped_entries.append(en)
+            if gap < 0 or gap > DEFAULTS.max_gap_percent:
+                entries_skipped.append(_skip_entry(en, f'gap_out_of_range_{gap:.2f}'))
                 continue
-
-            today_open = float(today_rows.iloc[0][open_col])
-            # prev_close = most recent close BEFORE today
-            prev_rows = hist[hist[date_col] < today]
-            prev_close = float(prev_rows.iloc[-1][close_col]) if not prev_rows.empty else en['prev_close']
-            avg_volume = float(hist[vol_col].tail(20).mean())
-
-            gap = (today_open - prev_close) / prev_close * 100 if prev_close > 0 else 0
-
-            if gap < 0:
-                print(f"  SKIP {sym}: negative gap ({gap:.1f}%)")
-                skipped_entries.append(en)
+            if float(pre_open) < DEFAULTS.screener_price_min:
+                entries_skipped.append(_skip_entry(en, 'price_below_min'))
                 continue
-            if gap > DEFAULTS.max_gap_percent:
-                print(f"  SKIP {sym}: gap too large ({gap:.1f}%)")
-                skipped_entries.append(en)
-                continue
-            if today_open < DEFAULTS.screener_price_min:
-                print(f"  SKIP {sym}: price ${today_open:.2f} < ${DEFAULTS.screener_price_min:.0f}")
-                skipped_entries.append(en)
+            if avg_volume is None:
+                entries_skipped.append(_skip_entry(en, 'insufficient_history'))
                 continue
             if avg_volume < DEFAULTS.min_volume_20d:
-                print(f"  SKIP {sym}: volume {avg_volume:.0f} < {DEFAULTS.min_volume_20d}")
-                skipped_entries.append(en)
+                entries_skipped.append(_skip_entry(en, 'volume_below_min'))
+                continue
+            if pre_change is None:
+                entries_skipped.append(_skip_entry(en, 'insufficient_history'))
+                continue
+            if pre_change < DEFAULTS.pre_earnings_change:
+                entries_skipped.append(_skip_entry(en, 'pre_change_below_min'))
                 continue
 
-            en['prev_close'] = prev_close
-            en['entry_price_est'] = today_open
-            en['gap_percent'] = gap
-            print(f"  VERIFIED {sym}: gap={gap:.1f}%, open=${today_open:.2f}")
+            en['_entry_price'] = float(pre_open)
+            en['_prev_close'] = prev_close
+            en['_gap'] = gap
+            print(f"  VERIFIED {sym}: gap={gap:.1f}%, pre_open=${float(pre_open):.2f}")
+        else:
+            price = float(en.get('entry_price_est') or en.get('prev_close') or 0)
+            if price <= 0:
+                entries_skipped.append(_skip_entry(en, 'no_preopen'))
+                continue
+            en['_entry_price'] = price
 
-        verified_plan.append(en)
+        survivors.append(en)
 
-    entry_plan = verified_plan
-    print(f"After AMC re-verification: {len(entry_plan)} entries")
+    survivors.sort(key=_sort_surprise, reverse=True)
+    dropped = survivors[DEFAULTS.top_n_per_day:]
+    survivors = survivors[:DEFAULTS.top_n_per_day]
+    for en in dropped:
+        entries_skipped.append(_skip_entry(en, 'top_n_cap'))
 
-    entry_results = []
-    for en in entry_plan:
+    if not check_risk_gate(trades, portfolio_value, today):
+        for en in survivors:
+            entries_skipped.append(_skip_entry(en, 'risk_gate'))
+        survivors = []
+
+    print(f"Entry plan: {len(survivors)} buys")
+
+    # ===== Phase 5: Place entries (no lock) =====
+    margin_room = portfolio_value * DEFAULTS.margin_ratio - total_position_value
+    placed_entries: List[Dict[str, Any]] = []
+    for en in survivors:
+        entry_price = float(en['_entry_price'])
         if margin_room <= 0:
-            print(f"  SKIP {en['symbol']}: margin limit reached")
-            entry_results.append({'entry': en, 'result': 'margin_limit', 'success': False})
+            entries_skipped.append(_skip_entry(en, 'margin_limit'))
             continue
-
         shares = AlpacaOrderManager.calculate_position_size(
-            portfolio_value, DEFAULTS.position_size,
-            en['prev_close'], DEFAULTS.slippage,
+            portfolio_value, DEFAULTS.position_size, entry_price, DEFAULTS.slippage,
         )
         if shares <= 0:
-            print(f"  SKIP {en['symbol']}: 0 shares (price too high)")
-            entry_results.append({'entry': en, 'result': '0_shares', 'success': False})
+            entries_skipped.append(_skip_entry(en, 'zero_shares'))
             continue
-
-        estimated_value = shares * en['prev_close']
+        estimated_value = shares * entry_price
         if estimated_value > margin_room:
-            shares = int(margin_room / en['prev_close'])
+            shares = int(margin_room / entry_price)
             if shares <= 0:
+                entries_skipped.append(_skip_entry(en, 'margin_caps_to_zero'))
+                continue
+        cid = AlpacaOrderManager.make_client_order_id(
+            en['symbol'], today, f"entry_{en.get('timing')}", 'buy'
+        )
+        result, filled_shares, outcome, skip_reason = _submit_with_reconciliation(
+            mgr, en['symbol'], shares, 'buy', cid, reference_price=entry_price,
+        )
+        if outcome not in ('filled_full', 'filled_partial'):
+            en['_submission'] = {
+                'cid': cid,
+                'submitted_shares': shares,
+                'submitted_reference_price': entry_price,
+                'outcome': outcome,
+            }
+            entries_skipped.append(_skip_entry(en, skip_reason or outcome))
+            continue
+        fill_price = float(result['filled_avg_price'])
+        actual_shares = int(filled_shares)
+        placed_entries.append({
+            'entry': en,
+            'symbol': en['symbol'],
+            'shares': actual_shares,
+            'entry_price_est': entry_price,
+            'fill_price': fill_price,
+            'result': result,
+        })
+        margin_room -= actual_shares * fill_price
+        print(f"  BOUGHT {en['symbol']} {actual_shares} shares (fill ${fill_price:.2f})")
+
+    # ===== Phase 6: State update (short lock) =====
+    exits_placed: List[Dict[str, Any]] = []
+    exits_skipped: List[Dict[str, Any]] = []
+    with lock:
+        trades_now = load_json(paths.trades)
+        pending_exits_now = load_json(paths.pending_exits)
+        pending_entries_now = load_json(paths.pending_entries)
+
+        for er in exit_results:
+            ex = er['exit']
+            if er['outcome'] not in ('filled_full', 'filled_partial'):
+                exits_skipped.append(_skip_exit(ex, er.get('skip_reason') or er['outcome']))
+                if er['outcome'] == 'pending_unfilled':
+                    for p in pending_exits_now:
+                        if _pending_exit_matches(p, ex):
+                            p['submitted_client_order_id'] = er['cid']
+                            p['submitted_shares'] = er['submitted_shares']
+                            p['submitted_reference_price'] = er['submitted_reference_price']
+                            p['submitted_at'] = datetime.utcnow().isoformat() + 'Z'
+                            p['submission_status'] = 'pending'
                 continue
 
-        cid = AlpacaOrderManager.make_client_order_id(
-            en['symbol'], today, f"entry_{en['timing']}", 'buy'
-        )
-        try:
-            result = mgr.submit_market_order(
-                en['symbol'], shares, side='buy', client_order_id=cid
-            )
-            if result.get('status') == 'duplicate':
-                existing = mgr.get_order_by_client_id(cid)
-                if existing and existing.get('status') == 'filled':
-                    entry_results.append({'entry': en, 'result': existing,
-                                          'success': True, 'shares': shares})
-                    margin_room -= estimated_value
-                    print(f"  RECONCILED {en['symbol']}: prior order filled")
-                else:
-                    entry_results.append({'entry': en, 'result': result,
-                                          'success': False, 'shares': shares})
-                    print(f"  SKIP {en['symbol']}: duplicate, status={existing.get('status') if existing else 'unknown'}")
-            else:
-                entry_results.append({'entry': en, 'result': result,
-                                      'success': True, 'shares': shares})
-                margin_room -= estimated_value
-                print(f"  BOUGHT {en['symbol']} {shares} shares "
-                      f"(est ${en['prev_close']:.2f})")
-        except Exception as e:
-            entry_results.append({'entry': en, 'result': str(e), 'success': False})
-            print(f"  FAILED buy {en['symbol']}: {e}")
-
-    # Phase 3: Record (short lock)
-    with lock:
-        trades = load_json(TRADES_FILE)
-        pending_exits = load_json(PENDING_EXITS_FILE)
-        pending_entries = load_json(PENDING_ENTRIES_FILE)
-
-        # Record successful exits
-        for er in exit_results:
-            if er['success']:
-                ex = er['exit']
-                result = er['result']
-                for t in trades:
-                    if t['symbol'] == ex['symbol'] and t['status'] == 'open':
-                        fill_price = result.get('filled_avg_price') or ex.get('trigger_price', 0)
-                        pnl = (fill_price - t['entry_price']) * ex['shares'] if fill_price else 0
-                        t['legs'].append({
-                            'date': today,
-                            'action': f"exit_{ex['reason']}",
-                            'shares': ex['shares'],
-                            'price': fill_price,
-                            'pnl': round(pnl, 2),
-                            'reason': ex['reason'],
-                            'order_id': result.get('id', ''),
-                            'client_order_id': result.get('client_order_id', ''),
-                        })
-                        t['remaining_shares'] -= ex['shares']
-                        if t['remaining_shares'] <= 0:
-                            t['status'] = 'closed'
-                        break
-                # Remove from pending
-                pending_exits = [
-                    pe for pe in pending_exits if pe['symbol'] != ex['symbol']
-                ]
-
-        # Record successful entries
-        for er in entry_results:
-            if er['success']:
-                en = er['entry']
-                result = er['result']
-                shares = er['shares']
-                fill_price = result.get('filled_avg_price') or en['prev_close']
-                stop_price = fill_price * (1 - DEFAULTS.stop_loss / 100) if fill_price else 0
-
-                new_trade = {
-                    'symbol': en['symbol'],
-                    'entry_date': today,
-                    'entry_price': fill_price,
-                    'initial_shares': shares,
-                    'remaining_shares': shares,
-                    'stop_loss_price': round(stop_price, 2),
-                    'screener_score': en.get('score', 0),
-                    'timing': en.get('timing', ''),
-                    'status': 'open',
-                    'legs': [{
+            fill_price = float(er['result']['filled_avg_price'])
+            filled_shares = int(er['filled_shares'])
+            matched = False
+            pnl = 0.0
+            for t in trades_now:
+                if t.get('symbol') == ex.get('symbol') and t.get('status') == 'open':
+                    pnl = (fill_price - float(t.get('entry_price', 0))) * filled_shares
+                    t.setdefault('legs', []).append({
                         'date': today,
-                        'action': 'entry',
-                        'shares': shares,
+                        'action': f"exit_{ex.get('reason', 'unknown')}",
+                        'shares': filled_shares,
                         'price': fill_price,
-                        'order_id': result.get('id', ''),
-                        'client_order_id': result.get('client_order_id', ''),
-                    }],
-                }
-                trades.append(new_trade)
-
-                # Remove from pending
-                pending_entries = [
-                    pe for pe in pending_entries
-                    if not (pe['symbol'] == en['symbol'] and pe['timing'] == en['timing'])
-                ]
-
-        # Also remove skipped entries (failed re-verification) from pending
-        # to prevent stale candidates from re-executing on the next day
-        skip_keys = {
-            (se['symbol'], se.get('timing'))
-            for se in skipped_entries
-        }
-        if skip_keys:
-            pending_entries = [
-                pe for pe in pending_entries
-                if (pe['symbol'], pe.get('timing')) not in skip_keys
+                        'pnl': round(pnl, 2),
+                        'reason': ex.get('reason', ''),
+                        'order_id': er['result'].get('id', ''),
+                        'client_order_id': er['result'].get('client_order_id', ''),
+                    })
+                    t['remaining_shares'] = int(t.get('remaining_shares', 0)) - filled_shares
+                    if t['remaining_shares'] <= 0:
+                        t['status'] = 'closed'
+                    matched = True
+                    break
+            if not matched:
+                exits_skipped.append(_skip_exit(ex, 'no_matching_open_trade'))
+                continue
+            pending_exits_now = [
+                p for p in pending_exits_now if not _pending_exit_matches(p, ex)
             ]
-            print(f"  Removed {len(skip_keys)} skipped entries from pending")
+            exits_placed.append({
+                'exit': ex,
+                'symbol': ex.get('symbol'),
+                'shares': filled_shares,
+                'fill_price': fill_price,
+                'pnl': round(pnl, 2),
+                'result': er['result'],
+            })
 
-        save_json_atomic(TRADES_FILE, trades)
-        save_json_atomic(PENDING_EXITS_FILE, pending_exits)
-        save_json_atomic(PENDING_ENTRIES_FILE, pending_entries)
+        for pe in placed_entries:
+            en = pe['entry']
+            fill_price = pe['fill_price']
+            shares = int(pe['shares'])
+            stop_price = fill_price * (1 - DEFAULTS.stop_loss / 100)
+            trades_now.append({
+                'symbol': en['symbol'],
+                'entry_date': today,
+                'entry_price': fill_price,
+                'initial_shares': shares,
+                'remaining_shares': shares,
+                'stop_loss_price': round(stop_price, 2),
+                'screener_score': en.get('score', _sort_surprise(en)),
+                'eps_surprise_percent': en.get('eps_surprise_percent', en.get('eps_surprise')),
+                'gap_percent': en.get('_gap', en.get('gap_percent')),
+                'timing': en.get('timing', ''),
+                'status': 'open',
+                'legs': [{
+                    'date': today,
+                    'action': 'entry',
+                    'shares': shares,
+                    'price': fill_price,
+                    'order_id': pe['result'].get('id', ''),
+                    'client_order_id': pe['result'].get('client_order_id', ''),
+                }],
+            })
+            pending_entries_now = [
+                p for p in pending_entries_now if not _pending_entry_matches(p, en)
+            ]
 
-    # Summary
-    ok_exits = sum(1 for r in exit_results if r['success'])
-    ok_entries = sum(1 for r in entry_results if r['success'])
+        for s in entries_skipped:
+            if s.get('reason') != 'not_filled':
+                continue
+            en = s['entry']
+            sub = en.get('_submission', {})
+            for p in pending_entries_now:
+                if _pending_entry_matches(p, en):
+                    p['submitted_client_order_id'] = sub.get('cid')
+                    p['submitted_shares'] = sub.get('submitted_shares')
+                    p['submitted_reference_price'] = sub.get('submitted_reference_price')
+                    p['submitted_at'] = datetime.utcnow().isoformat() + 'Z'
+                    p['submission_status'] = 'pending'
+
+        skip_keys = {
+            (s.get('symbol'), s.get('trade_date') or _entry_date(s.get('entry', {})), s.get('timing'))
+            for s in entries_skipped
+            if _cleanup_eligible(str(s.get('reason', '')))
+        }
+        pending_entries_now = [
+            p for p in pending_entries_now
+            if _entry_key(p) not in skip_keys
+        ]
+
+        cutoff = (datetime.strptime(today, '%Y-%m-%d') - timedelta(days=7)).strftime('%Y-%m-%d')
+        pending_entries_now = [
+            p for p in pending_entries_now
+            if (p.get('trade_date') or p.get('date') or today) >= cutoff
+            or p.get('submission_status') == 'pending'
+        ]
+        pending_exits_now = [
+            p for p in pending_exits_now
+            if p.get('detected_at', today) >= cutoff
+            or p.get('submission_status') == 'pending'
+        ]
+
+        save_json_atomic(paths.trades, trades_now)
+        save_json_atomic(paths.pending_exits, pending_exits_now)
+        save_json_atomic(paths.pending_entries, pending_entries_now)
+
     print(f"\n=== Summary ===")
-    print(f"Exits: {ok_exits}/{len(exit_results)} successful")
-    print(f"Entries: {ok_entries}/{len(entry_results)} successful")
+    print(f"Exits: {len(exits_placed)}/{len(exit_results)} successful")
+    print(f"Entries: {len(placed_entries)}/{len(survivors)} successful")
+    return {
+        'entries_planned': survivors,
+        'entries_placed': placed_entries,
+        'entries_skipped': entries_skipped,
+        'exits_planned': pending_exits,
+        'exits_placed': exits_placed,
+        'exits_skipped': exits_skipped,
+    }
 
 
 def main():
@@ -632,7 +736,7 @@ def main():
     group.add_argument('--execute', action='store_true',
                        help='Execute pending exits and entries')
     parser.add_argument('--dry-run', action='store_true',
-                        help='Preview without placing orders')
+                        help='Use dry-run state with deterministic fills; no broker orders')
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(message)s')

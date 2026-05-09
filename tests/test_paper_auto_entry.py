@@ -251,3 +251,83 @@ class TestExecutePending:
             pending = json.load(f)
         assert len(pending) == 1
         assert pending[0]['symbol'] == 'FAIL'
+
+    def test_dry_run_uses_injected_state_dir_and_records_fill(self, tmp_data_dir):
+        """dry-run should use DryRunAccount and persist only to the injected state dir."""
+        import scripts.paper_auto_entry as mod
+
+        pending_entries = os.path.join(tmp_data_dir, 'pending_entries.json')
+        trades_file = os.path.join(tmp_data_dir, 'paper_trades.json')
+        with open(pending_entries, 'w') as f:
+            json.dump([{
+                'symbol': 'DRY',
+                'timing': None,
+                'date': '2026-03-03',
+                'entry_price_est': 50.0,
+                'score': 70,
+            }], f)
+
+        fake_fetcher = Mock()
+        fake_fetcher.get_preopen_price.return_value = 50.0
+
+        result = mod.execute_pending(
+            dry_run=True,
+            data_fetcher=fake_fetcher,
+            today_str='2026-03-03',
+            state_dir=tmp_data_dir,
+        )
+
+        assert [e['symbol'] for e in result['entries_placed']] == ['DRY']
+        with open(trades_file) as f:
+            trades = json.load(f)
+        assert len(trades) == 1
+        assert trades[0]['symbol'] == 'DRY'
+        assert trades[0]['entry_price'] == 50.0
+        with open(pending_entries) as f:
+            pending = json.load(f)
+        assert pending == []
+
+    def test_not_filled_entry_is_annotated_for_reconciliation(self, tmp_data_dir):
+        """accepted/new orders that do not fill inside polling stay pending with submission metadata."""
+        import scripts.paper_auto_entry as mod
+
+        pending_entries = os.path.join(tmp_data_dir, 'pending_entries.json')
+        with open(pending_entries, 'w') as f:
+            json.dump([{
+                'symbol': 'LATE',
+                'timing': None,
+                'date': '2026-03-03',
+                'entry_price_est': 40.0,
+                'score': 70,
+            }], f)
+
+        mock_mgr = Mock()
+        mock_mgr.get_positions.return_value = []
+        mock_mgr.get_account_summary.return_value = {
+            'portfolio_value': 100000,
+            'buying_power': 100000,
+        }
+        mock_mgr.submit_market_order.return_value = {
+            'id': 'accepted1',
+            'status': 'accepted',
+            'client_order_id': 'late-order',
+        }
+        mock_mgr.get_order_by_client_id.return_value = None
+
+        with patch.object(mod, 'MAX_POLL_TRIES', 0):
+            result = mod.execute_pending(
+                dry_run=False,
+                alpaca_manager=mock_mgr,
+                today_str='2026-03-03',
+                state_dir=tmp_data_dir,
+            )
+
+        assert result['entries_placed'] == []
+        assert result['entries_skipped'][0]['reason'] == 'not_filled'
+        with open(pending_entries) as f:
+            pending = json.load(f)
+        assert len(pending) == 1
+        assert pending[0]['symbol'] == 'LATE'
+        assert pending[0]['submission_status'] == 'pending'
+        assert pending[0]['submitted_client_order_id']
+        assert pending[0]['submitted_shares'] > 0
