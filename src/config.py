@@ -52,6 +52,7 @@ class BacktestConfig:
     target_symbols: Optional[Set[str]] = None
     enable_earnings_date_validation: bool = False
     use_fmp_data: bool = True  # デフォルトでFMPを使用
+    generate_reports: bool = True
 
     # ギャップ上限設定
     max_gap_percent: float = DEFAULTS.max_gap_percent

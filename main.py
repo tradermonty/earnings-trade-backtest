@@ -70,6 +70,8 @@ def parse_arguments():
     # 出力設定
     parser.add_argument('--language', type=str, choices=['en', 'ja'], default='en',
                         help='Output language')
+    parser.add_argument('--no_reports', action='store_true',
+                        help='Skip HTML/CSV report generation (useful for sweeps and CI)')
     
     # 決算日検証
     parser.add_argument('--enable_date_validation', action='store_true',
