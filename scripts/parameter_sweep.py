@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import copy
 import csv
 import io
 import math
@@ -29,7 +30,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from itertools import product
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 try:
     from zoneinfo import ZoneInfo
@@ -53,6 +54,162 @@ class Period:
 
 ParamSet = Dict[str, float]
 MetricsRunner = Callable[[Period, ParamSet], Dict[str, Any]]
+PARAM_KEYS = (
+    'min_surprise',
+    'max_gap',
+    'pre_earnings_change',
+    'stop_loss',
+    'position_size',
+)
+
+
+def _clone_cached_value(value: Any) -> Any:
+    """Return a defensive copy for mutable cached API results."""
+    if isinstance(value, (dict, list, set, tuple)):
+        return copy.deepcopy(value)
+    if hasattr(value, 'copy'):
+        try:
+            return value.copy(deep=True)
+        except TypeError:
+            try:
+                return value.copy()
+            except TypeError:
+                pass
+    return copy.deepcopy(value)
+
+
+def _freeze(value: Any) -> Any:
+    """Convert common containers into hashable cache-key fragments."""
+    if isinstance(value, dict):
+        return tuple(sorted((key, _freeze(val)) for key, val in value.items()))
+    if isinstance(value, (list, tuple, set)):
+        return tuple(_freeze(val) for val in value)
+    return value
+
+
+class _MemoizingFMPFetcher:
+    """Small proxy for FMP calls that bypass DataFetcher methods."""
+
+    def __init__(self, wrapped: Any):
+        self._wrapped = wrapped
+        self._stock_screener_cache: Dict[Tuple[Any, ...], Any] = {}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._wrapped, name)
+
+    def stock_screener(self, *args: Any, **kwargs: Any) -> Any:
+        key = (_freeze(args), _freeze(kwargs))
+        if key not in self._stock_screener_cache:
+            self._stock_screener_cache[key] = self._wrapped.stock_screener(
+                *args, **kwargs
+            )
+        return _clone_cached_value(self._stock_screener_cache[key])
+
+
+class MemoizingDataFetcher:
+    """In-process cache for repeated parameter-sweep backtests.
+
+    The sweep runs the same periods many times while changing only strategy
+    parameters.  This wrapper keeps the expensive market/earnings API calls in
+    memory and returns defensive copies so downstream filters cannot mutate the
+    cache across combinations.
+    """
+
+    def __init__(self, wrapped: Any):
+        self._wrapped = wrapped
+        self.use_fmp = getattr(wrapped, 'use_fmp', False)
+        self.api_key = getattr(wrapped, 'api_key', '')
+        wrapped_fmp = getattr(wrapped, 'fmp_fetcher', None)
+        self.fmp_fetcher = (
+            _MemoizingFMPFetcher(wrapped_fmp)
+            if wrapped_fmp is not None
+            else None
+        )
+        self.alpaca_fetcher = getattr(wrapped, 'alpaca_fetcher', None)
+        self._earnings_cache: Dict[Tuple[Any, ...], Any] = {}
+        self._historical_cache: Dict[Tuple[str, str, str], Any] = {}
+        self._preopen_cache: Dict[Tuple[str, str], Any] = {}
+        self._market_cap_cache: Dict[Tuple[str, str], Any] = {}
+        self._sp500_cache: Optional[Any] = None
+        self._mid_small_cache: Dict[Tuple[float, float], Any] = {}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._wrapped, name)
+
+    @property
+    def has_fmp_screener(self) -> bool:
+        return self.fmp_fetcher is not None
+
+    def get_sp500_symbols(self) -> List[str]:
+        if self._sp500_cache is None:
+            self._sp500_cache = self._wrapped.get_sp500_symbols()
+        return _clone_cached_value(self._sp500_cache)
+
+    def get_mid_small_symbols(
+        self,
+        min_market_cap: float = 1e9,
+        max_market_cap: float = 50e9,
+    ) -> List[str]:
+        key = (float(min_market_cap), float(max_market_cap))
+        if key not in self._mid_small_cache:
+            self._mid_small_cache[key] = self._wrapped.get_mid_small_symbols(
+                min_market_cap=min_market_cap,
+                max_market_cap=max_market_cap,
+            )
+        return _clone_cached_value(self._mid_small_cache[key])
+
+    def get_earnings_data(
+        self,
+        start_date: str,
+        end_date: str,
+        target_symbols: Optional[list] = None,
+    ) -> Dict[str, Any]:
+        symbols_key = tuple(sorted(target_symbols)) if target_symbols else None
+        key = (start_date, end_date, symbols_key)
+        if key not in self._earnings_cache:
+            self._earnings_cache[key] = self._wrapped.get_earnings_data(
+                start_date,
+                end_date,
+                target_symbols=target_symbols,
+            )
+        return _clone_cached_value(self._earnings_cache[key])
+
+    def get_historical_data(
+        self,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+    ) -> Any:
+        key = (symbol, start_date, end_date)
+        if key not in self._historical_cache:
+            self._historical_cache[key] = self._wrapped.get_historical_data(
+                symbol,
+                start_date,
+                end_date,
+            )
+        return _clone_cached_value(self._historical_cache[key])
+
+    def get_preopen_price(self, symbol: str, trade_date: str) -> Optional[float]:
+        key = (symbol, trade_date)
+        if key not in self._preopen_cache:
+            self._preopen_cache[key] = self._wrapped.get_preopen_price(
+                symbol,
+                trade_date,
+            )
+        return self._preopen_cache[key]
+
+    def get_historical_market_cap(
+        self,
+        symbol: str,
+        date: str,
+    ) -> Optional[float]:
+        key = (symbol, date)
+        if key not in self._market_cap_cache:
+            self._market_cap_cache[key] = self._wrapped.get_historical_market_cap(
+                symbol,
+                date,
+            )
+        return self._market_cap_cache[key]
 
 
 def today_et() -> str:
@@ -125,6 +282,7 @@ def run_backtest_period(
     params: ParamSet,
     *,
     use_fmp_data: bool,
+    data_fetcher: Optional[Any] = None,
     target_symbols: Optional[Iterable[str]] = None,
     verbose: bool = False,
 ) -> Dict[str, Any]:
@@ -140,7 +298,11 @@ def run_backtest_period(
         target_symbols=set(target_symbols) if target_symbols else None,
         generate_reports=False,
     )
-    backtest = EarningsBacktest(config)
+    backtest = EarningsBacktest(
+        config,
+        data_fetcher=data_fetcher,
+        target_symbols=set(target_symbols) if target_symbols else None,
+    )
     stream = contextlib.nullcontext()
     if not verbose:
         stream = contextlib.redirect_stdout(io.StringIO())
@@ -212,6 +374,45 @@ def summarize_combination(
     return row
 
 
+def _param_key(params: Dict[str, Any]) -> Tuple[str, ...]:
+    return tuple(f'{float(params[key]):.10g}' for key in PARAM_KEYS)
+
+
+def completed_param_keys(rows: List[Dict[str, Any]]) -> set[Tuple[str, ...]]:
+    return {
+        _param_key(row)
+        for row in rows
+        if all(key in row and row[key] != '' for key in PARAM_KEYS)
+    }
+
+
+def filter_rows_to_grid(
+    rows: List[Dict[str, Any]],
+    grid: List[ParamSet],
+) -> List[Dict[str, Any]]:
+    requested = {_param_key(params) for params in grid}
+    return [
+        row for row in rows
+        if all(key in row and row[key] != '' for key in PARAM_KEYS)
+        and _param_key(row) in requested
+    ]
+
+
+def rank_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    rows.sort(
+        key=lambda row: (
+            _metric(row, 'worst_return_pct'),
+            _metric(row, 'avg_return_pct'),
+            -_metric(row, 'max_drawdown_pct'),
+            _metric(row, 'worst_profit_factor'),
+        ),
+        reverse=True,
+    )
+    for rank, row in enumerate(rows, start=1):
+        row['rank'] = rank
+    return rows
+
+
 def run_sweep(
     periods: List[Period],
     grid: List[ParamSet],
@@ -226,18 +427,45 @@ def run_sweep(
         }
         rows.append(summarize_combination(idx, params, metrics_by_period))
 
-    rows.sort(
-        key=lambda row: (
-            row['worst_return_pct'],
-            row['avg_return_pct'],
-            -row['max_drawdown_pct'],
-            row['worst_profit_factor'],
-        ),
-        reverse=True,
-    )
-    for rank, row in enumerate(rows, start=1):
-        row['rank'] = rank
-    return rows
+    return rank_rows(rows)
+
+
+def read_csv_rows(output: Path) -> List[Dict[str, Any]]:
+    if not output.exists():
+        return []
+    with output.open(newline='') as f:
+        return list(csv.DictReader(f))
+
+
+def run_sweep_incremental(
+    periods: List[Period],
+    grid: List[ParamSet],
+    *,
+    runner: MetricsRunner,
+    output: Path,
+    resume: bool = False,
+) -> List[Dict[str, Any]]:
+    """Run a sweep while writing a resumable CSV after each combination."""
+    rows = filter_rows_to_grid(read_csv_rows(output), grid) if resume else []
+    completed = completed_param_keys(rows)
+    if rows:
+        print(f'Resumed {len(rows)} completed combinations from {output}')
+
+    for idx, params in enumerate(grid, start=1):
+        key = _param_key(params)
+        if key in completed:
+            print(f'Skipping completed combo_id={idx}: {params}')
+            continue
+        metrics_by_period = {
+            period.name: runner(period, params)
+            for period in periods
+        }
+        rows.append(summarize_combination(idx, params, metrics_by_period))
+        completed.add(key)
+        write_csv(rank_rows(rows), output)
+        print(f'Saved progress: {len(rows)}/{len(grid)} combinations -> {output}')
+
+    return rank_rows(rows)
 
 
 def write_csv(rows: List[Dict[str, Any]], output: Path) -> None:
@@ -251,6 +479,55 @@ def write_csv(rows: List[Dict[str, Any]], output: Path) -> None:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def print_top_combination(rows: List[Dict[str, Any]]) -> None:
+    if not rows:
+        return
+    print('Top combination:')
+    top = rows[0]
+    print(
+        f"rank=1 combo_id={top['combo_id']} "
+        f"worst_return={top['worst_return_pct']} "
+        f"avg_return={top['avg_return_pct']} "
+        f"max_dd={top['max_drawdown_pct']} "
+        f"params={{min_surprise={top['min_surprise']}, max_gap={top['max_gap']}, "
+        f"pre_change={top['pre_earnings_change']}, stop_loss={top['stop_loss']}, "
+        f"position_size={top['position_size']}}}"
+    )
+
+
+def build_shared_sweep_context(
+    *,
+    use_fmp_data: bool,
+    explicit_target_symbols: Optional[List[str]],
+) -> Tuple[MemoizingDataFetcher, Optional[List[str]], str]:
+    """Create one cached data fetcher and, when possible, one shared universe."""
+    from src.data_fetcher import DataFetcher
+    from src.universe_builder import build_target_universe
+
+    data_fetcher = MemoizingDataFetcher(DataFetcher(use_fmp=use_fmp_data))
+    if explicit_target_symbols:
+        return data_fetcher, explicit_target_symbols, 'explicit'
+
+    base_config = BacktestConfig(
+        start_date='2000-01-01',
+        end_date='2000-01-02',
+        use_fmp_data=use_fmp_data,
+        generate_reports=False,
+    )
+    symbols, source = build_target_universe(
+        data_fetcher,
+        sp500_only=base_config.sp500_only,
+        mid_small_only=base_config.mid_small_only,
+        min_market_cap=base_config.min_market_cap,
+        max_market_cap=base_config.max_market_cap,
+        screener_price_min=base_config.screener_price_min,
+        backtest_mode=True,
+    )
+    if symbols:
+        return data_fetcher, sorted(symbols), source
+    return data_fetcher, None, source
 
 
 def parse_args() -> argparse.Namespace:
@@ -285,6 +562,10 @@ def parse_args() -> argparse.Namespace:
                         default=Path('reports/parameter_sweep_summary.csv'))
     parser.add_argument('--dry-run', action='store_true',
                         help='Print planned combinations without running backtests.')
+    parser.add_argument('--resume', action='store_true',
+                        help='Resume from existing output CSV and skip completed parameter combinations.')
+    parser.add_argument('--no-shared-data', action='store_true',
+                        help='Disable shared DataFetcher/universe cache between combinations.')
     parser.add_argument('--verbose', action='store_true',
                         help='Do not suppress per-backtest output.')
     return parser.parse_args()
@@ -316,31 +597,54 @@ def main() -> int:
         if s.strip()
     ] or None
 
+    if args.resume:
+        existing_rows = filter_rows_to_grid(read_csv_rows(args.output), grid)
+        completed = completed_param_keys(existing_rows)
+        if existing_rows and all(_param_key(params) in completed for params in grid):
+            rows = rank_rows(existing_rows)
+            write_csv(rows, args.output)
+            print(f'All {len(grid)} combinations already completed in {args.output}')
+            print_top_combination(rows)
+            return 0
+
+    shared_fetcher = None
+    if not args.no_shared_data:
+        shared_fetcher, target_symbols, source = build_shared_sweep_context(
+            use_fmp_data=not args.use_eodhd,
+            explicit_target_symbols=target_symbols,
+        )
+        if target_symbols:
+            print(
+                f'Shared data cache enabled; universe={source} '
+                f'({len(target_symbols)} symbols)'
+            )
+        else:
+            print(
+                f'Shared data cache enabled; universe={source} '
+                '(per-run universe fallback remains enabled)'
+            )
+
     def runner(period: Period, params: ParamSet) -> Dict[str, Any]:
         print(f'Running combo={params} period={period.name}...')
         return run_backtest_period(
             period,
             params,
             use_fmp_data=not args.use_eodhd,
+            data_fetcher=shared_fetcher,
             target_symbols=target_symbols,
             verbose=args.verbose,
         )
 
-    rows = run_sweep(periods, grid, runner=runner)
+    rows = run_sweep_incremental(
+        periods,
+        grid,
+        runner=runner,
+        output=args.output,
+        resume=args.resume,
+    )
     write_csv(rows, args.output)
     print(f'Wrote {len(rows)} ranked combinations to {args.output}')
-    if rows:
-        print('Top combination:')
-        top = rows[0]
-        print(
-            f"rank=1 combo_id={top['combo_id']} "
-            f"worst_return={top['worst_return_pct']} "
-            f"avg_return={top['avg_return_pct']} "
-            f"max_dd={top['max_drawdown_pct']} "
-            f"params={{min_surprise={top['min_surprise']}, max_gap={top['max_gap']}, "
-            f"pre_change={top['pre_earnings_change']}, stop_loss={top['stop_loss']}, "
-            f"position_size={top['position_size']}}}"
-        )
+    print_top_combination(rows)
     return 0
 
 
