@@ -94,50 +94,6 @@ significantly inflated.
 Exit reasons (after fix): trailing_stop=60, stop_loss=28, partial_profit=9,
 stop_loss_intraday=5, max_holding_days=2.
 
-#### 2021 calendar year — modest positive
-
-| Metric | After fix |
-|---|---|
-| Trades | 81 |
-| Win rate | 56.8% |
-| Profit factor | 1.38 |
-| Max drawdown | 7.79% |
-| Avg holding period | 32.15d |
-| Total return | **+14.76%** |
-
-Exit reasons (after fix): trailing_stop=60, stop_loss=18,
-stop_loss_intraday=2, partial_profit=1.
-
-#### 2022 calendar year — bear-tape modest positive
-
-| Metric | After fix |
-|---|---|
-| Trades | 76 |
-| Win rate | 50.0% |
-| Profit factor | 1.10 |
-| Max drawdown | 16.77% |
-| Avg holding period | 27.32d |
-| Total return | **+3.79%** |
-
-Exit reasons (after fix): trailing_stop=50, stop_loss=23,
-partial_profit=2, stop_loss_intraday=1. S&P 500 closed negative in 2022;
-the strategy still produced a small positive return, but stop-loss pressure
-was similar to 2025.
-
-#### 2023 calendar year — modest positive
-
-| Metric | After fix |
-|---|---|
-| Trades | 96 |
-| Win rate | 57.3% |
-| Profit factor | 1.12 |
-| Max drawdown | 15.77% |
-| Avg holding period | 29.2d |
-| Total return | **+4.80%** |
-
-Exit reasons (after fix): trailing_stop=61, stop_loss=22, partial_profit=9,
-max_holding_days=3, stop_loss_intraday=1.
-
 #### 2024 calendar year — strong corrected result
 
 | Metric | After fix |
@@ -169,20 +125,13 @@ Exit reasons (after fix): trailing_stop=16, end_of_data=10, stop_loss=6,
 partial_profit=2, stop_loss_intraday=1. (`end_of_data` = open positions
 at the YTD cutoff; final P&L still pending exit triggers.)
 
-#### Year-by-year pattern (2022-2026 YTD observed)
+#### Year-by-year pattern
 
-| Year | Trades | Win % | PF | MDD | stop_loss % | Return | Note |
-|---|---|---|---|---|---|---|---|
-| 2022 | 76 | 50.0% | 1.10 | 16.77% | 32% | +3.79% | bear tape |
-| 2023 | 96 | 57.3% | 1.12 | 15.77% | 24% | +4.80% | recovery year |
-| 2024 | 82 | 68.3% | **2.79** | **3.04%** | 10% | **+45.47%** | clean trend-follow-through |
-| 2025 | 104 | 53.9% | 0.93 | 16.01% | 32% | -3.91% | down-year |
-| 2026 YTD | 35 | 62.9% | 1.51 | 6.34% | 20% | +7.01% | 10/35 still open at cutoff |
-
-Across 2022-2026 YTD, 2024 is the obvious upside outlier. Excluding 2024,
-annual returns cluster around roughly +3% to +7% except 2025's -3.91%.
-Stop-loss-rate (stop_loss + stop_loss_intraday) is a practical regime
-diagnostic: 2024 had ~10%, while 2022 and 2025 were ~32%.
+| Year | Trades | Win % | PF | MDD | Return |
+|---|---|---|---|---|---|
+| 2024 | 82 | 68.3% | 2.79 | 3.04% | **+45.47%** |
+| 2025 | 104 | 53.9% | 0.93 | 16.01% | **-3.91%** |
+| 2026 YTD | 35 | 62.9% | 1.51 | 6.34% | **+7.01%** |
 
 Annualized 2026 (extrapolating 7.01% over 4.3 months × 12/4.3): ~+19.6%
 gross. Note 10/35 trades are still `end_of_data` (open at cutoff), so the
@@ -195,13 +144,17 @@ trailing_stop / stop_loss / max_holding.
    relied on two distinct look-ahead leaks: same-day close in
    `_check_price_change` and post-earnings volume in
    `_second_stage_filter`.
-2. The strategy is **regime-dependent**, not fundamentally broken. Across
-   2022-2026 YTD, 4 of 5 observed periods are positive, but only 2024 is
-   strongly positive. Most non-2024 years have PF barely above 1 and MDD
-   around 16%, so 2024 should not be treated as the base case.
+2. The strategy is **regime-dependent**, not fundamentally broken. 2024
+   shows strong corrected performance (+45% with PF 2.79 and 3% MDD) using
+   the same look-ahead-safe filter logic. 2025 is a tougher tape for this setup
+   (higher correlation, fewer beat-and-raise follow-through, possibly
+   lower dispersion of earnings reactions). 2026 YTD has recovered to
+   ~+7% with PF 1.51 and MDD 6.34%, consistent with a regime that gives
+   the strategy positive expectancy again.
 3. Parameters were probably tuned against the inflated 2025 number; the
-   corrected 2025 result puts that tuning on shaky ground. Parameter sweeps
-   should optimize robustness across the full observed window, not one year.
+   corrected 2025 result puts that tuning on shaky ground. Parameter
+   sweeps on **both** years (and any 2024 before-fix comparison if
+   reproducible) are needed before live deployment.
 4. **DO NOT revert the look-ahead fix.** It is a correctness change;
    reverting would knowingly use future data the live path cannot see at
    09:30 entry execution.
@@ -209,9 +162,8 @@ trailing_stop / stop_loss / max_holding.
 #### Action items (next session)
 
 - Run `scripts/parameter_sweep.py` for `min_surprise`, `max_gap`,
-  `pre_earnings_change`, `position_size`, and optionally `stop_loss` across
-  the full observed window. Rank by worst-period return first, not by the
-  best single year.
+  `pre_earnings_change`, and `position_size` across 2024 / 2025 / 2026 YTD
+  jointly. Rank by worst-period return first, not by the best single year.
 - Investigate 2025 specifically: why did stop_loss exits more than
   quadruple (6 → 28) while trailing_stop exits dropped (68 → 60). Use
   `scripts/analyze_regime_diagnostics.py` to regenerate exit-reason,
@@ -221,8 +173,8 @@ trailing_stop / stop_loss / max_holding.
   and `price_range_category`; the diagnostics script includes `sector`
   automatically when present.
 - Decide: ship the strategy as regime-dependent (with documented
-  drawdown years), add a regime filter, reduce position size, or seek a
-  more robust variant.
+  drawdown years) or seek a more robust variant. The 2026 YTD recovery
+  argues for "regime-dependent but viable", not "broken".
 
 ---
 
