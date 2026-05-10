@@ -245,6 +245,69 @@ trailing_stop / stop_loss / max_holding.
   drawdown years), add a regime filter, reduce position size, or seek a
   more robust variant.
 
+### 1.5 Robust parameter candidate (sweep run 2026-05-10)
+
+Multi-axis parameter sweeps using `scripts/parameter_sweep.py` against the
+full 6.4-year window (2020 H2, 2021, 2022, 2023, 2024, 2025, 2026 YTD)
+identified the following tentative best parameter set, ranked by
+**worst-period return first**:
+
+| Parameter | Current default | Sweep candidate |
+|---|---|---|
+| `min_surprise_percent` | 5.0 | **10.0** |
+| `max_gap_percent` | 10.0 | **8.0** |
+| `pre_earnings_change` | 0.0 | 0.0 |
+| `stop_loss` | 10.0 | **8.0** |
+| `position_size` | 15.0 | 15.0 |
+
+#### 6.4-year aggregate metrics
+
+| Metric | Value |
+|---|---|
+| Total trades | 498 |
+| Worst-period return | **+1.98%** |
+| Average return | +12.05% |
+| Worst-period profit factor | 1.04 |
+| Max drawdown | 13.31% |
+
+#### Year-by-year return (candidate parameters)
+
+| Period | Return |
+|---|---|
+| 2020 H2 | +5.54% |
+| 2021 | +14.62% |
+| 2022 | +16.36% |
+| 2023 | +2.72% |
+| 2024 | +38.02% |
+| 2025 | +1.98% |
+| 2026 YTD | +5.08% |
+
+All 7 observed periods are positive — a meaningful robustness improvement
+over the corrected current-default baseline (2025: −3.91%).
+
+#### Axis-by-axis findings
+
+- `max_gap=8` is more robust than 9 / 10.
+- `pre_earnings_change > 0` worsens results.
+- `min_surprise=10` is better than 8 / 12.5 / 15.
+- `position_size=15` is better than 10 / 12.5.
+- `stop_loss=8` is better than 7 / 9 / 10.
+
+#### Source sweep artifacts (2026-05-10)
+
+- `reports/parameter_sweep_gap_p15_long_20260510.csv`
+- `reports/parameter_sweep_surprise_prechange_p15_long_20260510.csv`
+- `reports/parameter_sweep_position_min10_long_20260510.csv`
+- `reports/parameter_sweep_min_surprise_refine_long_20260510.csv`
+- `reports/parameter_sweep_stop_loss_min10_long_20260510.csv`
+
+#### Status
+
+**Recorded, not yet applied.** Promoting these values to
+`StrategyDefaults` is a behavior change with downstream impact (tests,
+existing scripts, live cutover gate). The decision and rollout are
+tracked separately from this documentation entry.
+
 ---
 
 ## 2. Window distance preserved
