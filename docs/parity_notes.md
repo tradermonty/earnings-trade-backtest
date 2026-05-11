@@ -312,11 +312,16 @@ tracked separately from this documentation entry.
 
 To make the "regime-dependent" framing in §1.4 / §1.5 concrete, the
 candidate-parameter year-by-year returns were aligned with a market
-breadth index series (`market_breadth_data_20250817_ma8.csv`, local
-artifact, not committed). The breadth index is a smoothed 8-day moving
-average proxy for the share of constituents in an up-trend; `>0.7` days
-are treated as **broad-participation** sessions and bearish-signal days
-as **narrow-participation / risk-off** sessions.
+breadth index series. The breadth index is a smoothed 8-day moving
+average proxy for the share of constituents in an up-trend; `>0.7`
+days are treated as **broad-participation** sessions and
+bearish-signal days as **narrow-participation / risk-off** sessions.
+
+Source: `https://tradermonty.github.io/market-breadth-analysis/market_breadth_data.csv`
+(remote, range 2016-05-10..2026-05-07). The earlier draft of this
+section used a local snapshot ending 2025-08-15; the table and
+correlations below have been re-computed using the full remote data so
+that 2025 is full-year and 2026 YTD can be included.
 
 | Year | Strategy | S&P 500 proxy | Breadth8 avg | Breadth>0.7 days | Bearish signal days |
 |---|---|---|---|---|---|
@@ -324,33 +329,36 @@ as **narrow-participation / risk-off** sessions.
 | 2021 | +14.62% | +30.51% | 0.83 | 91.3% | 29.0% |
 | 2022 | +16.36% | −18.65% | 0.41 | 4.0% | 83.3% |
 | 2023 | +2.72% | +26.71% | 0.58 | 17.2% | 20.8% |
-| 2024 | +38.02% | +25.59% | 0.75 | 90.1% | 3.6% |
-| 2025 | +1.98% | +10.71% | 0.52 | 0.0% | 79.4% |
+| 2024 | +38.02% | +25.59% | 0.761 | 95.6% | 3.6% |
+| 2025 | +1.98% | +18.01% | 0.573 | 0.0% | 48.8% |
+| 2026 YTD | +5.08% | +7.38% | 0.607 | 0.0% | 46.0% |
 
 **Data caveats.**
-- Local breadth CSV covers through 2025-08-15. The 2025 breadth row,
-  the 2025 S&P 500 proxy return (+10.71%), and the 2025 Breadth8 /
-  Breadth>0.7 / bearish-day shares are all **partial-year** (Jan 2 –
-  Aug 15). The 2025 strategy return (+1.98%), in contrast, is
-  full-year. Direct comparison of the 2025 row across columns is
-  therefore not apples-to-apples.
-- 2026 YTD is not included because the breadth file does not cover it.
-- Sample size is 6 yearly observations. Treat all correlations below as
-  hypothesis-generating, not confirmatory.
+- The 2026 YTD row covers through 2026-05-07 only (remote CSV cutoff
+  and strategy YTD share the same cutoff window — see §1.4 / §1.5).
+  10 of 34 trades for 2026 are still `end_of_data` (open at cutoff),
+  so the 2026 number is not yet a final P&L.
+- 2020 is a partial year (Aug-Dec) on the strategy side; the breadth
+  row covers the full calendar year.
+- 2020-2024 and 2025 rows above are *full-year* breadth, full-year
+  strategy. The earlier "S&P proxy partial-year" caveat that applied
+  to the local snapshot has been resolved by the remote CSV.
+- Sample size is 7 yearly observations. Treat all correlations below
+  as hypothesis-generating, not confirmatory.
 
 #### Pairwise correlations vs strategy return
 
-| Counter-variable | Pearson r (n=6) |
+| Counter-variable | Pearson r (n=7) |
 |---|---|
-| S&P 500 proxy return | **0.09** (essentially none) |
-| Breadth8 yearly average | ~0.33 (weak positive) |
-| Breadth>0.7 days share | **0.65** |
+| S&P 500 proxy return | **0.07** (essentially none) |
+| Breadth8 yearly average | 0.32 (weak positive) |
+| Breadth>0.7 days share | **0.70** |
 
-The S&P 500 proxy ↔ strategy correlation of ~0.09 is the load-bearing
-observation: **the strategy is not an index-level long.** The 0.65
+The S&P 500 proxy ↔ strategy correlation of ~0.07 is the load-bearing
+observation: **the strategy is not an index-level long.** The 0.70
 correlation with broad-participation days is suggestive that the
 strategy's edge tracks *breadth of follow-through*, not headline index
-return. The mid-range Breadth8 *yearly average* correlation (0.33)
+return. The mid-range Breadth8 *yearly average* correlation (0.32)
 hides regime structure that the binary Breadth>0.7 metric exposes more
 cleanly — see the regime split below.
 
@@ -386,18 +394,30 @@ perspective, plus one specific weak regime.
   this strategy**; the absence of follow-through in *mid* breadth
   while bearish signals dominate is.
 
-**Weak regime — middle-breadth + bearish / trend-down.**
+**Weak regime — middle-breadth "stuck below 0.70".**
 - Index can be flat or rising on narrow leadership, but breadth is
   neither high (so no broad participation) nor washed out (so no
-  scarce-winner concentration).
+  scarce-winner concentration). The signature is a Breadth8 that
+  spends most of the year in the **0.55-0.70 band** without breaking
+  above 0.70 (Breadth>0.7 share ≈ 0%).
 - Earnings beats fail to follow through, or get sold the same day.
 - Rotation is fast; individual trends do not mature before the stop
   hits.
-- 2025 is the case (partial-year breadth caveat above): Breadth>0.7
-  share 0.0%, bearish days 79.4%, strategy +1.98% vs S&P proxy
-  +10.7%. Exit-reason analysis showed `stop_loss` count rising
-  sharply (cf. §1.4 / `regime_diagnostics`), consistent with
-  trailing stops not getting reached.
+- 2025 (full-year remote breadth): Breadth8 avg 0.573, Breadth>0.7
+  share 0.0%, bearish days 48.8%, strategy +1.98% vs S&P proxy
+  +18.01%. The full-year remote data shows bearish-day share is much
+  lower than the local 2025-08-15 snapshot suggested (48.8% vs
+  79.4%), so "bearish days dominate" alone is not the right
+  explanation — the right explanation is "Breadth8 stuck in
+  0.55-0.70 with no broad-participation days at all" (see 2025
+  bucket breakdown below).
+- 2026 YTD (through 2026-05-07): Breadth8 avg 0.607, Breadth>0.7
+  share 0.0%, bearish days 46.0%. Same regime signature as 2025, but
+  the strategy is +5.08% — partly because the 0.55-0.70 band is the
+  *only* breadth bucket with material trade count and it has been
+  productive YTD (see 2026 bucket breakdown). This is a hint that
+  the weak regime is not deterministic; the strategy can still earn
+  modestly inside it.
 - 2023 partly fits: Breadth8 avg 0.58, Breadth>0.7 share 17.2%,
   strategy +2.72% vs S&P proxy +26.7% — the largest *relative*
   underperformance vs the index, despite a positive absolute number.
@@ -455,6 +475,71 @@ Source artifacts (local, not committed):
 - `reports/breadth_regime_joined_trades_20260510.csv`
 - `reports/breadth_regime_combined_summary_20260510.csv`
 
+#### 2025 full-year refinement (remote breadth)
+
+Joining 2025 candidate-parameter trades against the *full-year* remote
+breadth series gives a cleaner picture than the local 2025-08-15
+snapshot. Bucketing by Breadth8 at trade entry:
+
+| 2025 Breadth8 bucket | Trades | PF | Return contrib. | stop_loss% |
+|---|---:|---:|---:|---:|
+| low (<0.40) | 11 | 2.24 | +4.80% | 27.3% |
+| 0.40–0.55 | 13 | 1.82 | +5.09% | 38.5% |
+| **0.55–0.70** | **76** | **0.80** | **−7.90%** | **42.1%** |
+| ≥0.70 | 0 | — | 0.00% | — |
+
+The 0.55–0.70 bucket holds 76% of trades and is the *only* negative
+bucket. There is no `≥0.70` bucket because the year never produced a
+Breadth>0.7 session. This sharpens the §1.6 weak-regime definition:
+the danger is not "bearish-signal-day dominance" per se, it is
+**Breadth8 stuck in 0.55–0.70 without breaking out**, which traps
+the strategy in the bucket that historically follows through worst.
+
+Monthly contribution within 2025 makes the timing concrete:
+
+| 2025 month | Return contrib. | PF |
+|---|---:|---:|
+| Feb | −6.59% | 0.27 |
+| Aug | −4.61% | 0.10 |
+| Oct | −3.95% | 0.56 |
+| Apr | +4.85% | 2.28 |
+| Dec | +4.31% | 2.39 |
+
+Roughly three months drive the full-year drawdown.
+
+#### 2026 YTD refinement (through 2026-05-07)
+
+| 2026 Breadth8 bucket | Trades | PF | Return contrib. | Note |
+|---|---:|---:|---:|---|
+| 0.55–0.70 | 32 | 1.42 | +5.19% | main bucket |
+| 0.40–0.55 | 2 | 0.71 | −0.12% | small |
+| ≥0.70 | 0 | — | 0.00% | not yet observed |
+
+2026 YTD aggregate: 34 trades, PF 1.40, +5.08%, MDD 5.54%. Of the 34
+trades, **10 are `end_of_data`** (open at cutoff), so April-onward
+attribution is not final.
+
+| 2026 month | Return contrib. | PF | Note |
+|---|---:|---:|---|
+| Jan | +3.94% | 2.40 | constructive |
+| Feb | +4.33% | 3.13 | constructive |
+| Mar | −3.73% | 0.06 | stop_loss heavy |
+| Apr | +0.53% | 1.14 | many `end_of_data`, not final |
+
+The 2026 YTD gain is concentrated in Jan-Feb. March was a regime
+mini-shift (stop_loss-heavy), and April attribution depends on
+positions still open at the cutoff.
+
+Source artifacts (local, not committed):
+
+- `reports/breadth_regime_remote_full_2025_buckets_20260510.csv`
+- `reports/breadth_regime_remote_full_2025_monthly_20260510.csv`
+- `reports/breadth_regime_remote_full_2026ytd_buckets_20260510.csv`
+- `reports/breadth_regime_remote_full_2026ytd_monthly_20260510.csv`
+
+(File names recorded for traceability; rename if local convention
+differs.)
+
 #### Implications
 
 1. The strategy is best framed as a **breadth-participation long** on
@@ -465,14 +550,16 @@ Source artifacts (local, not committed):
 3. A breadth-regime overlay is a candidate enhancement, but the
    trade-level data **does not support a simple "low Breadth8 → de-risk"
    rule** — 2022's low-breadth subset was one of the strongest cohorts
-   in the entire window. The candidate overlay shape is closer to
-   *de-risk in middle-breadth tapes with bearish-signal-day dominance*,
-   i.e. a joint condition on Breadth8 percentile **and** bearish-day
-   share. Any overlay should be tested with the same out-of-sample
-   discipline as parameter changes, not added by inference from n=6.
+   in the entire window, and 2025's `<0.40` and `0.40–0.55` buckets
+   were both positive (PF 2.24 and 1.82). The refined candidate overlay
+   shape is: **de-risk when Breadth8 is stuck in the 0.55–0.70 band
+   without breaking above 0.70**, optionally further gated on
+   bearish-signal-day share. Any overlay should be tested with the same
+   out-of-sample discipline as parameter changes, not added by
+   inference from n=7.
 4. Performance attribution and live monitoring should pair strategy
    P&L with breadth state (not S&P 500 return alone), and should
-   distinguish the two strong regimes from the middle-bearish weak
+   distinguish the two strong regimes from the "stuck 0.55–0.70" weak
    regime.
 
 **Status: hypothesis, not action.** No code change follows from this
@@ -483,14 +570,27 @@ starts from a written baseline.
 #### Suggested next experiment
 
 Test a regime overlay that, on a per-trade-date basis, either suppresses
-new entries or scales `position_size` down when the breadth regime is
-`middle_bearish_or_trend_down`. Re-sweep over 2020 H2 – 2026 YTD (with
-the breadth-data gap from 2025-08-15 onward documented) and compare
-robust-score-ranked output against the no-overlay candidate set from
-§1.5. Specifically check whether the 2025 result improves *without*
-materially harming the 2022 `low_breadth` contribution, since the
-`low_breadth` cohort is the largest source of upside in the bad-index
-year and must be preserved.
+new entries or scales `position_size` down when **Breadth8 is in the
+0.55–0.70 band and has not produced a Breadth>0.70 session recently**
+(operationalize "recently" via a rolling window, e.g. 20 sessions).
+The refined target is sharper than "low breadth → de-risk" (which
+2022 and the 2025 sub-0.55 buckets directly refute); the target is
+the *stuck-middle* tape that traps trades in the worst-PF bucket.
+
+Re-sweep over 2020 H2 – 2026 YTD using the remote breadth CSV and
+compare robust-score-ranked output against the no-overlay candidate
+set from §1.5. Mandatory checks:
+
+1. 2025 full-year result improves (driven by reduced exposure to the
+   0.55–0.70 bucket).
+2. 2022 `low_breadth` cohort contribution is preserved (the overlay
+   must not down-rank the `<0.40` bucket, since it is the largest
+   source of upside in a bad-index year).
+3. 2024 strong-breadth result is not materially harmed (overlay
+   should pass-through during high-breadth tapes).
+4. 2026 YTD `0.55–0.70` bucket (which was *productive* YTD,
+   +5.19%) is reviewed separately — overlay must not assume the
+   bucket is always loss-making; it is bucket-PF that varies.
 
 ---
 
