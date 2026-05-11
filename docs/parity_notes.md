@@ -308,6 +308,93 @@ over the corrected current-default baseline (2025: −3.91%).
 existing scripts, live cutover gate). The decision and rollout are
 tracked separately from this documentation entry.
 
+### 1.6 Regime sensitivity hypothesis (breadth correlation, 2026-05-10)
+
+To make the "regime-dependent" framing in §1.4 / §1.5 concrete, the
+candidate-parameter year-by-year returns were aligned with a market
+breadth index series (`market_breadth_data_20250817_ma8.csv`, local
+artifact, not committed). The breadth index is a smoothed 8-day moving
+average proxy for the share of constituents in an up-trend; `>0.7` days
+are treated as **broad-participation** sessions and bearish-signal days
+as **narrow-participation / risk-off** sessions.
+
+| Year | Strategy | S&P 500 proxy | Breadth8 avg | Breadth>0.7 days | Bearish signal days |
+|---|---|---|---|---|---|
+| 2020 | +5.54% | +14.66% | 0.73 | 49.1% | 0.0% |
+| 2021 | +14.62% | +30.51% | 0.83 | 91.3% | 29.0% |
+| 2022 | +16.36% | −18.65% | 0.41 | 4.0% | 83.3% |
+| 2023 | +2.72% | +26.71% | 0.58 | 17.2% | 20.8% |
+| 2024 | +38.02% | +25.59% | 0.75 | 90.1% | 3.6% |
+| 2025 | +1.98% | +10.71% | 0.52 | 0.0% | 79.4% |
+
+**Data caveats.**
+- Local breadth CSV covers through 2025-08-15. The 2025 breadth row is
+  therefore partial-year, while the 2025 strategy return is full-year.
+- 2026 YTD is not included because the breadth file does not cover it.
+- Sample size is 6 yearly observations. Treat all correlations below as
+  hypothesis-generating, not confirmatory.
+
+#### Pairwise correlations vs strategy return
+
+| Counter-variable | Pearson r (n=6) |
+|---|---|
+| S&P 500 proxy return | **0.09** (essentially none) |
+| Breadth8 average | (intermediate) |
+| Breadth>0.7 days share | **0.65** |
+
+The S&P 500 proxy ↔ strategy correlation of ~0.09 is the load-bearing
+observation: **the strategy is not an index-level long.** The 0.65
+correlation with broad-participation days is suggestive that the
+strategy's edge tracks *breadth of follow-through*, not headline index
+return.
+
+#### Working hypothesis: what makes the regime strong vs weak
+
+**Strong regime (strategy works):**
+- Breadth is wide; equal-weight / mid-small / non-mega-cap stocks
+  participate.
+- Post-earnings follow-through lasts long enough for the MA21 trailing
+  stop to ride the move (`trailing_stop` exit count dominates).
+- Bearish-signal days are scarce; positive earnings get re-rated rather
+  than fading.
+- 2022 is the informative case: index is deeply negative, breadth is
+  narrow, *but* the strategy is positive — earnings beats are the
+  scarce-positive signal in a bear tape and get concentrated buying.
+- 2024 is the textbook case: breadth high, bearish days <4%, MA21 catches
+  trends, `stop_loss` count near zero.
+
+**Weak regime (strategy underperforms):**
+- Index strength concentrated in mega-caps; breadth thin.
+  S&P Dow Jones notes Equal-Weight materially trailed the cap-weighted
+  index for the 2022-end → 2025-08 window — directly consistent with the
+  hypothesis.
+- Earnings beats fail to follow through, or get sold the same day.
+- Rotation is fast; individual trends do not mature before the stop hits.
+- 2025 is the case: Breadth>0.7 share 0.0%, bearish days 79.4%, and the
+  strategy is barely positive despite +10.7% on the index. The
+  `regime_diagnostics` exit-reason table (§ analyzed previously) shows
+  `stop_loss` count rising sharply in 2025, which is consistent with
+  trailing stops not getting reached.
+
+#### Implications
+
+1. The strategy is best framed as a **breadth-participation long** on
+   earnings surprises, not as a market-beta vehicle.
+2. Years where the index rises on narrow leadership (e.g. 2023, 2025)
+   are *expected* drawdown / underperformance years for this strategy.
+   They are not bugs.
+3. A breadth-regime overlay (e.g. de-risk when breadth8 is persistently
+   below some threshold) is a candidate enhancement — but should be
+   tested with the same out-of-sample discipline as parameter changes,
+   not added by inference from n=6.
+4. Performance attribution and live monitoring should pair strategy P&L
+   with breadth state, not with S&P 500 return alone.
+
+**Status: hypothesis, not action.** No code change follows from this
+section. Recorded so the next regime decision (overlay filter, position
+sizing by breadth, or "ship as regime-dependent and accept thin years")
+starts from a written baseline.
+
 ---
 
 ## 2. Window distance preserved
