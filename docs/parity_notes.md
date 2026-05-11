@@ -328,8 +328,12 @@ as **narrow-participation / risk-off** sessions.
 | 2025 | +1.98% | +10.71% | 0.52 | 0.0% | 79.4% |
 
 **Data caveats.**
-- Local breadth CSV covers through 2025-08-15. The 2025 breadth row is
-  therefore partial-year, while the 2025 strategy return is full-year.
+- Local breadth CSV covers through 2025-08-15. The 2025 breadth row,
+  the 2025 S&P 500 proxy return (+10.71%), and the 2025 Breadth8 /
+  Breadth>0.7 / bearish-day shares are all **partial-year** (Jan 2 –
+  Aug 15). The 2025 strategy return (+1.98%), in contrast, is
+  full-year. Direct comparison of the 2025 row across columns is
+  therefore not apples-to-apples.
 - 2026 YTD is not included because the breadth file does not cover it.
 - Sample size is 6 yearly observations. Treat all correlations below as
   hypothesis-generating, not confirmatory.
@@ -339,61 +343,154 @@ as **narrow-participation / risk-off** sessions.
 | Counter-variable | Pearson r (n=6) |
 |---|---|
 | S&P 500 proxy return | **0.09** (essentially none) |
-| Breadth8 average | (intermediate) |
+| Breadth8 yearly average | ~0.33 (weak positive) |
 | Breadth>0.7 days share | **0.65** |
 
 The S&P 500 proxy ↔ strategy correlation of ~0.09 is the load-bearing
 observation: **the strategy is not an index-level long.** The 0.65
 correlation with broad-participation days is suggestive that the
 strategy's edge tracks *breadth of follow-through*, not headline index
-return.
+return. The mid-range Breadth8 *yearly average* correlation (0.33)
+hides regime structure that the binary Breadth>0.7 metric exposes more
+cleanly — see the regime split below.
 
-#### Working hypothesis: what makes the regime strong vs weak
+#### Working hypothesis: two strong regimes, one weak regime
 
-**Strong regime (strategy works):**
+The yearly aggregate above is unimodal-looking, but trade-level
+diagnostics (see §1.4 exit-reason tables and the earlier
+`regime_diagnostics` work) suggest the strategy actually performs in
+**two distinct strong regimes** that look opposite from a breadth
+perspective, plus one specific weak regime.
+
+**Strong regime A — high-breadth broad participation.**
 - Breadth is wide; equal-weight / mid-small / non-mega-cap stocks
   participate.
 - Post-earnings follow-through lasts long enough for the MA21 trailing
   stop to ride the move (`trailing_stop` exit count dominates).
-- Bearish-signal days are scarce; positive earnings get re-rated rather
-  than fading.
-- 2022 is the informative case: index is deeply negative, breadth is
-  narrow, *but* the strategy is positive — earnings beats are the
-  scarce-positive signal in a bear tape and get concentrated buying.
-- 2024 is the textbook case: breadth high, bearish days <4%, MA21 catches
-  trends, `stop_loss` count near zero.
+- Bearish-signal days are scarce; positive earnings get re-rated
+  rather than fading.
+- 2024 is the textbook case: breadth high, bearish days <4%,
+  `stop_loss` count near zero.
+- 2021 also fits (Breadth8 avg 0.83, Breadth>0.7 share 91.3%).
 
-**Weak regime (strategy underperforms):**
-- Index strength concentrated in mega-caps; breadth thin.
-  S&P Dow Jones notes Equal-Weight materially trailed the cap-weighted
-  index for the 2022-end → 2025-08 window — directly consistent with the
-  hypothesis.
+**Strong regime B — low-breadth scarce-winner / washed-out tape.**
+- Index is weak and breadth is thin (low Breadth8 average, very few
+  Breadth>0.7 days), but the strategy still performs well because
+  earnings beats are the scarce positive signal in a bear tape and
+  get concentrated buying.
+- 2022 is the informative case: Breadth8 avg 0.41, Breadth>0.7 share
+  4.0%, bearish days 83.3% — yet the strategy returns +16.36%.
+  Trade-level: low-breadth subset (<0.40) had ~30 trades, PF ~11.7,
+  +27%, with stop_loss frequency under 7%.
+- Implication: **low breadth alone is not the risk-off signal for
+  this strategy**; the absence of follow-through in *mid* breadth
+  while bearish signals dominate is.
+
+**Weak regime — middle-breadth + bearish / trend-down.**
+- Index can be flat or rising on narrow leadership, but breadth is
+  neither high (so no broad participation) nor washed out (so no
+  scarce-winner concentration).
 - Earnings beats fail to follow through, or get sold the same day.
-- Rotation is fast; individual trends do not mature before the stop hits.
-- 2025 is the case: Breadth>0.7 share 0.0%, bearish days 79.4%, and the
-  strategy is barely positive despite +10.7% on the index. The
-  `regime_diagnostics` exit-reason table (§ analyzed previously) shows
-  `stop_loss` count rising sharply in 2025, which is consistent with
+- Rotation is fast; individual trends do not mature before the stop
+  hits.
+- 2025 is the case (partial-year breadth caveat above): Breadth>0.7
+  share 0.0%, bearish days 79.4%, strategy +1.98% vs S&P proxy
+  +10.7%. Exit-reason analysis showed `stop_loss` count rising
+  sharply (cf. §1.4 / `regime_diagnostics`), consistent with
   trailing stops not getting reached.
+- 2023 partly fits: Breadth8 avg 0.58, Breadth>0.7 share 17.2%,
+  strategy +2.72% vs S&P proxy +26.7% — the largest *relative*
+  underperformance vs the index, despite a positive absolute number.
+
+This three-regime split is internally consistent with the table at
+the top of this section, where 2022 (low breadth) is co-classified as
+strong with 2024 (high breadth).
+
+#### Trade-level breakdown: 2022 vs 2025 under candidate params
+
+Re-running the candidate parameter set (`min_surprise=10`, `max_gap=8`,
+`stop_loss=8`, `position_size=15`) and joining each trade to the
+breadth regime label gives:
+
+**Aggregate by year:**
+
+| Year | Trades | PF | Return | stop_loss% | Avg Breadth8 |
+|---|---:|---:|---:|---:|---:|
+| 2022 | 68 | 1.53 | +16.36% | 38.2% | 0.405 |
+| 2025 | 100 | 1.04 | +1.98% | 40.0% | 0.538 |
+
+**2022 by regime (positive year, low-breadth tape):**
+
+| Regime | Trades | PF | Return contrib. | stop_loss% |
+|---|---:|---:|---:|---:|
+| low_breadth | 30 | **11.73** | **+27.27%** | 6.7% |
+| middle_bearish_or_trend_down | 30 | 0.48 | −12.12% | 66.7% |
+
+**2025 by regime (flat year, mid-breadth tape):**
+
+| Regime | Trades | PF | Return contrib. | stop_loss% |
+|---|---:|---:|---:|---:|
+| middle_bearish_or_trend_down | 44 | 0.79 | −5.09% | 45.5% |
+| no_breadth_data | 33 | 0.87 | −2.17% | 42.4% |
+| low_breadth | 12 | 2.61 | +6.20% | 25.0% |
+| middle_constructive | 11 | 1.79 | +3.04% | 27.3% |
+
+Key reading:
+
+- The **`middle_bearish_or_trend_down`** regime contributes negative
+  returns and ~45–67% `stop_loss` exit share in both years. It is the
+  one cohort that is loss-making across regimes in this comparison.
+- In 2022, the strong `low_breadth` cohort (PF 11.73) more than
+  offsets the bad middle-bearish cohort; in 2025 the middle-bearish
+  cohort is too large a share of trades for the smaller `low_breadth`
+  and `middle_constructive` cohorts to offset.
+- This is the quantitative anchor for "not low-breadth = bad, but
+  middle-breadth + bearish = bad."
+
+Source artifacts (local, not committed):
+
+- `reports/breadth_regime_best_2022_2025_joined_trades_20260510.csv`
+- `reports/breadth_regime_best_2022_2025_combined_summary_20260510.csv`
+- `reports/breadth_regime_best_2022_2025_bucket_summary_20260510.csv`
+- `reports/breadth_regime_joined_trades_20260510.csv`
+- `reports/breadth_regime_combined_summary_20260510.csv`
 
 #### Implications
 
 1. The strategy is best framed as a **breadth-participation long** on
    earnings surprises, not as a market-beta vehicle.
 2. Years where the index rises on narrow leadership (e.g. 2023, 2025)
-   are *expected* drawdown / underperformance years for this strategy.
+   are *expected* relative-underperformance years for this strategy.
    They are not bugs.
-3. A breadth-regime overlay (e.g. de-risk when breadth8 is persistently
-   below some threshold) is a candidate enhancement — but should be
-   tested with the same out-of-sample discipline as parameter changes,
-   not added by inference from n=6.
-4. Performance attribution and live monitoring should pair strategy P&L
-   with breadth state, not with S&P 500 return alone.
+3. A breadth-regime overlay is a candidate enhancement, but the
+   trade-level data **does not support a simple "low Breadth8 → de-risk"
+   rule** — 2022's low-breadth subset was one of the strongest cohorts
+   in the entire window. The candidate overlay shape is closer to
+   *de-risk in middle-breadth tapes with bearish-signal-day dominance*,
+   i.e. a joint condition on Breadth8 percentile **and** bearish-day
+   share. Any overlay should be tested with the same out-of-sample
+   discipline as parameter changes, not added by inference from n=6.
+4. Performance attribution and live monitoring should pair strategy
+   P&L with breadth state (not S&P 500 return alone), and should
+   distinguish the two strong regimes from the middle-bearish weak
+   regime.
 
 **Status: hypothesis, not action.** No code change follows from this
 section. Recorded so the next regime decision (overlay filter, position
 sizing by breadth, or "ship as regime-dependent and accept thin years")
 starts from a written baseline.
+
+#### Suggested next experiment
+
+Test a regime overlay that, on a per-trade-date basis, either suppresses
+new entries or scales `position_size` down when the breadth regime is
+`middle_bearish_or_trend_down`. Re-sweep over 2020 H2 – 2026 YTD (with
+the breadth-data gap from 2025-08-15 onward documented) and compare
+robust-score-ranked output against the no-overlay candidate set from
+§1.5. Specifically check whether the 2025 result improves *without*
+materially harming the 2022 `low_breadth` contribution, since the
+`low_breadth` cohort is the largest source of upside in the bad-index
+year and must be preserved.
 
 ---
 
