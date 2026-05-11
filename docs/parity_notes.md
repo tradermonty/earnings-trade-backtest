@@ -479,11 +479,19 @@ Key reading:
 
 Source artifacts (local, not committed):
 
-- `reports/breadth_remote_best_2022_2025_joined_trades_20260510.csv`
-- `reports/breadth_remote_best_2022_2025_combined_summary_20260510.csv`
-- `reports/breadth_remote_best_2022_2025_bucket_summary_20260510.csv`
-- `reports/breadth_remote_best_2025_2026_bucket_summary_20260510.csv`
-- `reports/breadth_remote_best_2025_2026_monthly_summary_20260510.csv`
+- `reports/breadth_remote_best_joined_trades_20260510.csv` — full
+  per-trade dataset across all years
+- `reports/breadth_remote_best_year_combined_summary_20260510.csv` —
+  per-year aggregate (used for the §1.6 yearly table)
+- `reports/breadth_remote_best_year_bucket_summary_20260510.csv` —
+  per-year × Breadth8 bucket aggregate (covers 2022 and 2025 rows
+  above)
+- `reports/breadth_remote_best_2025_2026_bucket_summary_20260510.csv` —
+  2025 and 2026 YTD bucket aggregates used in the refinement
+  subsections below
+- `reports/breadth_remote_best_2025_2026_month_summary_20260510.csv` —
+  2025 and 2026 YTD monthly aggregates used in the monthly tables
+  below
 
 #### 2025 full-year refinement: Breadth8 buckets
 
