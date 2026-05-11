@@ -293,13 +293,39 @@ over the corrected current-default baseline (2025: −3.91%).
 - `position_size=15` is better than 10 / 12.5.
 - `stop_loss=8` is better than 7 / 9 / 10.
 
-#### Source sweep artifacts (2026-05-10)
+#### Local reproduction artifacts (2026-05-10)
+
+The `reports/` directory is **gitignored** and these CSVs are not
+committed; they are produced locally during the sweep and the
+numeric results above are transcribed directly so that the
+document is self-contained for readers on GitHub. The filenames
+below exist only as pointers for the author's reproducibility.
 
 - `reports/parameter_sweep_gap_p15_long_20260510.csv`
 - `reports/parameter_sweep_surprise_prechange_p15_long_20260510.csv`
 - `reports/parameter_sweep_position_min10_long_20260510.csv`
 - `reports/parameter_sweep_min_surprise_refine_long_20260510.csv`
 - `reports/parameter_sweep_stop_loss_min10_long_20260510.csv`
+
+To regenerate from scratch, the corresponding command shape is:
+
+```
+venv311/bin/python scripts/parameter_sweep.py \
+    --min-surprise <values> --max-gap <values> \
+    --pre-earnings-change <values> --stop-loss <values> \
+    --position-size <values> \
+    --period 2020_h2:2020-08-03:2020-12-31 \
+    --period 2021:2021-01-01:2021-12-31 \
+    --period 2022:2022-01-01:2022-12-31 \
+    --period 2023:2023-01-01:2023-12-31 \
+    --period 2024:2024-01-01:2024-12-31 \
+    --period 2025:2025-01-01:2025-12-31 \
+    --period 2026_ytd:2026-01-01:<today> \
+    --output reports/parameter_sweep_<axis>_long_<YYYYMMDD>.csv
+```
+
+`--resume` skips already-completed parameter combinations from a prior
+run, so the sweep is incrementally reproducible.
 
 #### Status
 
@@ -477,7 +503,9 @@ Key reading:
   it is *bucket size*, not just *bucket PF*, that determines the
   year outcome.
 
-Source artifacts (local, not committed):
+Local reproduction artifacts (under gitignored `reports/`; values
+above are copied here because the CSVs are not committed and are
+therefore not viewable on GitHub):
 
 - `reports/breadth_remote_best_joined_trades_20260510.csv` — full
   per-trade dataset across all years
@@ -492,6 +520,12 @@ Source artifacts (local, not committed):
 - `reports/breadth_remote_best_2025_2026_month_summary_20260510.csv` —
   2025 and 2026 YTD monthly aggregates used in the monthly tables
   below
+
+To regenerate locally, run the candidate-parameter sweep with
+`--output` pointing into `reports/` and then join the resulting
+trades CSV against the remote breadth CSV
+(`https://tradermonty.github.io/market-breadth-analysis/market_breadth_data.csv`).
+The join key is the trade entry date matched to the breadth row date.
 
 #### 2025 full-year refinement: Breadth8 buckets
 
