@@ -165,6 +165,8 @@ config.json
 *.json
 *.xlsx
 *.parquet
+# Small synthetic test fixtures are tracked
+!tests/fixtures/**/*.csv
 
 # Reports and outputs
 reports/

@@ -11,6 +11,7 @@ python scripts/run_backtest_from_aggregated.py aggregated_screen.csv \
 from __future__ import annotations
 
 import argparse
+import math
 import json
 import sys
 from datetime import datetime, timedelta
@@ -23,260 +24,152 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.main import EarningsBacktest  # noqa: E402
-from src.config import BacktestConfig  # noqa: E402
-from src.data_fetcher import DataFetcher  # noqa: E402
+from src.finviz_csv import (  # noqa: E402
+    ALWAYS_REQUIRED,
+    ALWAYS_REQUIRED_FIELDS,
+    FinvizCsvError,
+    add_csv_line_numbers,
+    parse_columns,
+    parse_percent,
+    validate_columns,
+)
 
 # -----------------------------------------------------------------------------
 # ヘルパー
 # -----------------------------------------------------------------------------
-
-import re
-
-
-from typing import Optional
+# 列と単位の契約は docs/finviz_csv_contract.md と src/finviz_csv.py を参照。
 
 
-def _to_float(val: Any) -> Optional[float]:
-    """数値を含む文字列を float に変換。変換不可の場合は None を返す"""
-    if val is None or (isinstance(val, float) and pd.isna(val)):
-        return None
-    try:
-        s = str(val).strip()
-        # % や $ 、カンマを除去
-        s = re.sub(r"[%,\$]", "", s)
-        if s == "":
-            return None
-        return float(s)
-    except Exception:
-        return None
+def _filter_specs(*, min_eps, min_price, max_gap, min_volume, min_market_cap_b,
+                  pre_change, min_perf1h, max_ps_ratio, max_pe_ratio,
+                  min_profit_margin, min_roa, max_volatility_week, min_perf_week,
+                  max_perf_week, max_perf_month, max_rsi14, max_pb_ratio):
+    """有効なフィルタごとに (ラベル, 必要フィールド, 条件関数) を返す。
+
+    閾値が None のフィルタは無効で、対応する列も要求しない。
+    条件関数は欠損 (NaN) を常に False として扱う (欠損は 0 とみなさない)。
+    """
+    specs = []
+
+    def add(threshold, label, keys, fn):
+        if threshold is not None:
+            specs.append((label, tuple(keys), fn))
+
+    add(min_eps, f"EPS Surprise >= {min_eps}%", ["_eps"], lambda d: d["_eps"] >= min_eps)
+    add(min_price, f"Price >= ${min_price}", ["_price"], lambda d: d["_price"] >= min_price)
+    add(min_volume, f"Avg Volume >= {min_volume}K", ["_vol"],
+        lambda d: d["_vol"] >= min_volume * 1_000)
+    add(max_gap, f"0 <= Gap <= {max_gap}%", ["_gap"],
+        lambda d: (d["_gap"] >= 0) & (d["_gap"] <= max_gap))
+    add(pre_change, f"Pre Change >= {pre_change}%", ["_perf_m", "_change"],
+        lambda d: (d["_perf_m"] - d["_change"]) >= pre_change)
+    add(min_perf1h, f"Perf 1H >= {min_perf1h}%", ["_perf1h"], lambda d: d["_perf1h"] >= min_perf1h)
+    add(min_market_cap_b, f"MktCap >= {min_market_cap_b}B", ["_mcap"],
+        lambda d: d["_mcap"] >= min_market_cap_b * 1e9)
+    add(max_ps_ratio, f"P/S <= {max_ps_ratio}", ["_ps"], lambda d: d["_ps"] <= max_ps_ratio)
+    add(max_pe_ratio, f"P/E <= {max_pe_ratio}", ["_pe"], lambda d: d["_pe"] <= max_pe_ratio)
+    add(min_profit_margin, f"Profit Margin >= {min_profit_margin}%", ["_profit_margin"],
+        lambda d: d["_profit_margin"] >= min_profit_margin)
+    add(min_roa, f"ROA >= {min_roa}%", ["_roa"], lambda d: d["_roa"] >= min_roa)
+    add(max_volatility_week, f"Vol(Week) <= {max_volatility_week}%", ["_vol_week"],
+        lambda d: d["_vol_week"] <= max_volatility_week)
+    add(min_perf_week, f"Perf(Week) >= {min_perf_week}%", ["_perf_week"],
+        lambda d: d["_perf_week"] >= min_perf_week)
+    add(max_perf_week, f"Perf(Week) <= {max_perf_week}%", ["_perf_week"],
+        lambda d: d["_perf_week"] <= max_perf_week)
+    add(max_perf_month, f"Perf(Month) <= {max_perf_month}%", ["_perf_m"],
+        lambda d: d["_perf_m"] <= max_perf_month)
+    add(max_rsi14, f"RSI(14) <= {max_rsi14}", ["_rsi14"], lambda d: d["_rsi14"] <= max_rsi14)
+    add(max_pb_ratio, f"P/B <= {max_pb_ratio}", ["_pb"], lambda d: d["_pb"] <= max_pb_ratio)
+    return specs
 
 
-def _parse_market_cap(text: str | float | int | None) -> Optional[float]:
-    """文字列の Market Cap ('12.3B', '450M' etc.) をドル単位の float に変換"""
-    if text is None:
-        return None
-    try:
-        s = str(text).strip().upper().replace("$", "")
-        if s.endswith("B"):
-            return float(s[:-1]) * 1e9
-        if s.endswith("M"):
-            return float(s[:-1]) * 1e6
-        if s.endswith("K"):
-            return float(s[:-1]) * 1e3
-        # 接尾辞なし = Finviz million 単位とみなす
-        return float(s) * 1e6
-    except Exception:
-        return None
+def filter_dataframe(df: pd.DataFrame, *, min_eps: float | None = 5.0,
+                     min_price: float | None = 10.0,
+                     max_gap: float | None = 10.0, min_volume: float | None = 200,
+                     min_market_cap_b: float | None = None,
+                     pre_change: float | None = 0.0,
+                     min_perf1h: float | None = 0.0,
+                     max_ps_ratio: float | None = None,
+                     max_pe_ratio: float | None = None,
+                     min_profit_margin: float | None = None,
+                     min_roa: float | None = None,
+                     max_volatility_week: float | None = None,
+                     min_perf_week: float | None = None,
+                     # 追加: 上限フィルタ（除外条件）
+                     max_perf_week: float | None = None,
+                     max_perf_month: float | None = None,
+                     max_rsi14: float | None = None,
+                     max_pb_ratio: float | None = None,
+                     max_trades_per_day: int | None = 5,
+                     debug: bool = False) -> pd.DataFrame:
+    """aggregated_screen.csv の DataFrame に対して DataFilter 相当の条件で絞り込みを行う。
 
-
-def filter_dataframe(df: pd.DataFrame, *, min_eps: float = 5.0, min_price: float = 10.0,
-                      max_gap: float = 10.0, min_volume: int = 200_000,
-                      min_market_cap_b: float | None = None,
-                      pre_change: float = 0.0,
-                      min_perf1h: float = 0.0,
-                      max_ps_ratio: float | None = None,
-                      max_pe_ratio: float | None = None,
-                      min_profit_margin: float | None = None,
-                      min_roa: float | None = None,
-                      max_volatility_week: float | None = None,
-                      min_perf_week: float | None = None,
-                      # 追加: 上限フィルタ（除外条件）
-                      max_perf_week: float | None = None,
-                      max_perf_month: float | None = None,
-                      max_rsi14: float | None = None,
-                      max_pb_ratio: float | None = None,
-                      max_trades_per_day: int | None = 5,
-                      debug: bool = False) -> pd.DataFrame:
-    """aggregated_screen.csv の DataFrame に対して DataFilter 相当の条件で絞り込みを行う"""
-    # 必要な列の標準化
+    - 有効なフィルタに必要な列が無い場合は、候補選定の前に FinvizCsvError を送出する。
+    - 値が欠損している行は、その行が必要とするフィルタで不合格とし、件数を報告する。
+      測定値の 0 (例: ``0%``, ``0``) は欠損と区別し、通常の値として評価する。
+    """
     df = df.copy()
     df.columns = df.columns.str.strip()
 
-    # EPS Surprise
-    if "EPS Surprise" in df.columns:
-        def _eps_transform(x):
-            v = _to_float(x)
-            if v is None:
-                return 0.0
-            # Finviz は 0.1234 = 12.34% の形式。|v|<1 の場合パーセントに換算
-            return v * 100 if abs(v) < 1 else v
-        df["_eps"] = df["EPS Surprise"].apply(_eps_transform)
-    else:
-        df["_eps"] = 0.0
+    specs = _filter_specs(
+        min_eps=min_eps, min_price=min_price, max_gap=max_gap, min_volume=min_volume,
+        min_market_cap_b=min_market_cap_b, pre_change=pre_change, min_perf1h=min_perf1h,
+        max_ps_ratio=max_ps_ratio, max_pe_ratio=max_pe_ratio,
+        min_profit_margin=min_profit_margin, min_roa=min_roa,
+        max_volatility_week=max_volatility_week, min_perf_week=min_perf_week,
+        max_perf_week=max_perf_week, max_perf_month=max_perf_month,
+        max_rsi14=max_rsi14, max_pb_ratio=max_pb_ratio,
+    )
+    required = {"EPS Surprise ranking": ALWAYS_REQUIRED_FIELDS}
+    required.update({label: keys for label, keys, _ in specs})
+    resolved = validate_columns(df, required)
+    df = parse_columns(df, resolved)
 
-    # Price (Open/Close などがあり得る)
-    price_col = None
-    for col in ["Price", "Open", "Close", "Entry Price", "Entry"]:
-        if col in df.columns:
-            price_col = col
-            break
-    if price_col:
-        df["_price"] = df[price_col].apply(_to_float)
-    else:
-        df["_price"] = None
-
-    # Gap (Finviz: 0.0218 = 2.18%)
-    _percent_transform = lambda x: (lambda v: (v*100 if abs(v)<1 else v) if v is not None else None)(_to_float(x))
-    if "Gap" in df.columns:
-        df["_gap"] = df["Gap"].apply(_percent_transform)
-    else:
-        df["_gap"] = None
-
-    # Performance (Month) & Change
-    if "Performance (Month)" in df.columns:
-        df["_perf_m"] = df["Performance (Month)"].apply(_percent_transform).fillna(0)
-    else:
-        df["_perf_m"] = 0.0
-    if "Change" in df.columns:
-        df["_change"] = df["Change"].apply(_percent_transform).fillna(0)
-    else:
-        df["_change"] = 0.0
-    import numpy as np
-    df["_pre_change"] = np.where(df["_perf_m"].notna() & df["_change"].notna(), df["_perf_m"] - df["_change"], np.nan)
-
-    # Performance (1 Hour)
-    if "Performance (1 Hour)" in df.columns:
-        df["_perf1h"] = df["Performance (1 Hour)"].apply(_percent_transform).fillna(0)
-    else:
-        df["_perf1h"] = 0.0
-
-    # Market Cap
-    if "Market Cap" in df.columns:
-        df["_mcap"] = df["Market Cap"].apply(_parse_market_cap)
-    else:
-        df["_mcap"] = None
-
-    # Avg Volume
-    vol_col = None
-    for col in ["Avg Vol", "Avg Vol (3 month)", "Average Volume", "Volume"]:
-        if col in df.columns:
-            vol_col = col
-            break
-    if vol_col:
-        df["_vol"] = df[vol_col].apply(_to_float) * 1_000
-    else:
-        df["_vol"] = None
-
-    # XGBoost分析で重要と判明した追加パラメーター
-    # P/S Ratio
-    if "P/S" in df.columns:
-        df["_ps"] = df["P/S"].apply(_to_float)
-    else:
-        df["_ps"] = None
-    
-    # P/E Ratio
-    if "P/E" in df.columns:
-        df["_pe"] = df["P/E"].apply(_to_float)
-    else:
-        df["_pe"] = None
-    
-    # Profit Margin
-    if "Profit Margin" in df.columns:
-        df["_profit_margin"] = df["Profit Margin"].apply(_percent_transform)
-    else:
-        df["_profit_margin"] = None
-    
-    # Return on Assets (ROA)
-    if "Return on Assets" in df.columns:
-        df["_roa"] = df["Return on Assets"].apply(_percent_transform)
-    else:
-        df["_roa"] = None
-    
-    # Volatility (Week)
-    if "Volatility (Week)" in df.columns:
-        df["_vol_week"] = df["Volatility (Week)"].apply(_percent_transform)
-    else:
-        df["_vol_week"] = None
-    
-    # Performance (Week)
-    if "Performance (Week)" in df.columns:
-        df["_perf_week"] = df["Performance (Week)"].apply(_percent_transform)
-    else:
-        df["_perf_week"] = None
-    
-    # Relative Strength Index (14)
-    if "Relative Strength Index (14)" in df.columns:
-        df["_rsi14"] = df["Relative Strength Index (14)"].apply(_to_float)
-    else:
-        df["_rsi14"] = None
-    
-    # P/B Ratio
-    if "P/B" in df.columns:
-        df["_pb"] = df["P/B"].apply(_to_float)
-    else:
-        df["_pb"] = None
-
-    # --- 各条件を個別に評価 ---
-    cond_eps = df["_eps"] >= min_eps
-    cond_price = (df["_price"].isna()) | (df["_price"] >= min_price)
-    cond_vol = (df["_vol"].isna()) | (df["_vol"] >= min_volume * 1_000)
-    cond_gap = (df["_gap"].isna()) | ((df["_gap"] >= 0) & (df["_gap"] <= max_gap))
-    cond_pre = (df["_pre_change"].isna()) | (df["_pre_change"] >= pre_change)
-    cond_perf1h = (df["_perf1h"].isna()) | (df["_perf1h"] >= min_perf1h)
-    cond_mcap = (min_market_cap_b is None) | (df["_mcap"].isna()) | (df["_mcap"] >= min_market_cap_b * 1e9)
-    
-    # 新しい条件（XGBoostで重要と判明）
-    cond_ps = (max_ps_ratio is None) | (df["_ps"].isna()) | (df["_ps"] <= max_ps_ratio)
-    cond_pe = (max_pe_ratio is None) | (df["_pe"].isna()) | (df["_pe"] <= max_pe_ratio)
-    cond_profit = (min_profit_margin is None) | (df["_profit_margin"].isna()) | (df["_profit_margin"] >= min_profit_margin)
-    cond_roa = (min_roa is None) | (df["_roa"].isna()) | (df["_roa"] >= min_roa)
-    cond_vol_w = (max_volatility_week is None) | (df["_vol_week"].isna()) | (df["_vol_week"] <= max_volatility_week)
-    cond_perf_w = (min_perf_week is None) | (df["_perf_week"].isna()) | (df["_perf_week"] >= min_perf_week)
-    # 追加: 上限条件
-    cond_perf_w_max = (max_perf_week is None) | (df["_perf_week"].isna()) | (df["_perf_week"] <= max_perf_week)
-    cond_perf_m_max = (max_perf_month is None) | (df["_perf_m"].isna()) | (df["_perf_m"] <= max_perf_month)
-    cond_rsi14 = (max_rsi14 is None) | (df["_rsi14"].isna()) | (df["_rsi14"] <= max_rsi14)
-    cond_pb = (max_pb_ratio is None) | (df["_pb"].isna()) | (df["_pb"] <= max_pb_ratio)
-
+    total = len(df)
+    cond = pd.Series(True, index=df.index)
+    missing_report = {}
     if debug:
-        total = len(df)
         print("[DEBUG] 条件別通過数:")
-        print(f"  EPS >= {min_eps}%          : {cond_eps.sum()}/{total}")
-        print(f"  Price >= ${min_price}       : {cond_price.sum()}/{total}")
-        print(f"  Volume >= {min_volume}K     : {cond_vol.sum()}/{total}")
-        print(f"  0<=Gap<={max_gap}%          : {cond_gap.sum()}/{total}")
-        print(f"  Pre Change >= {pre_change}%   : {cond_pre.sum()}/{total}")
-        print(f"  Perf 1H >= {min_perf1h}%      : {cond_perf1h.sum()}/{total}")
-        if min_market_cap_b is not None:
-            print(f"  MktCap >= {min_market_cap_b}B : {cond_mcap.sum()}/{total}")
-        # 新条件のデバッグ出力
-        if max_ps_ratio is not None:
-            print(f"  P/S <= {max_ps_ratio}         : {cond_ps.sum()}/{total}")
-        if max_pe_ratio is not None:
-            print(f"  P/E <= {max_pe_ratio}         : {cond_pe.sum()}/{total}")
-        if min_profit_margin is not None:
-            print(f"  Profit Margin >= {min_profit_margin}% : {cond_profit.sum()}/{total}")
-        if min_roa is not None:
-            print(f"  ROA >= {min_roa}%             : {cond_roa.sum()}/{total}")
-        if max_volatility_week is not None:
-            print(f"  Vol(Week) <= {max_volatility_week}% : {cond_vol_w.sum()}/{total}")
-        if min_perf_week is not None:
-            print(f"  Perf(Week) >= {min_perf_week}% : {cond_perf_w.sum()}/{total}")
-        if max_perf_week is not None:
-            print(f"  Perf(Week) <= {max_perf_week}% : {cond_perf_w_max.sum()}/{total}")
-        if max_perf_month is not None:
-            print(f"  Perf(Month) <= {max_perf_month}% : {cond_perf_m_max.sum()}/{total}")
-        if max_rsi14 is not None:
-            print(f"  RSI(14) <= {max_rsi14} : {cond_rsi14.sum()}/{total}")
-        if max_pb_ratio is not None:
-            print(f"  P/B <= {max_pb_ratio}         : {cond_pb.sum()}/{total}")
+    for label, keys, fn in specs:
+        missing = df[list(keys)].isna().any(axis=1)
+        passed = fn(df).fillna(False).astype(bool) & ~missing
+        if missing.any():
+            missing_report[label] = int(missing.sum())
+        if debug:
+            print(f"  {label:<28}: {int(passed.sum())}/{total}")
+        cond &= passed
 
-    cond = cond_eps & cond_price & cond_vol & cond_gap & cond_pre & cond_perf1h & cond_mcap & \
-           cond_ps & cond_pe & cond_profit & cond_roa & cond_vol_w & cond_perf_w & cond_pb & \
-           cond_perf_w_max & cond_perf_m_max & cond_rsi14
+    # 識別子と、順位付けに使う EPS Surprise が欠損している行も除外する。
+    # min_eps フィルタが有効なら EPS の欠損はそこで報告済みなので二重に数えない。
+    eps_reported = any("_eps" in keys for _, keys, _ in specs)
+    base_missing = {
+        "Trade Date": df["Trade Date"].isna(),
+        "Ticker": df["Ticker"].isna() | (df["Ticker"].astype(str).str.strip() == ""),
+        "EPS Surprise ranking": df["_eps"].isna(),
+    }
+    for label, missing in base_missing.items():
+        if missing.any() and not (label == "EPS Surprise ranking" and eps_reported):
+            missing_report[label] = int(missing.sum())
+        cond &= ~missing
+
+    for label, n in missing_report.items():
+        print(f"[WARN] 欠損値のため除外: {label} -> {n}/{total} 行")
+    df.attrs["missing_report"] = missing_report
 
     filtered = df[cond].reset_index(drop=True)
+    filtered.attrs["missing_report"] = missing_report
 
     # 日付ごとに EPS サプライズ上位N銘柄を選択 (Nは max_trades_per_day)
-    if "Trade Date" in filtered.columns and (max_trades_per_day is not None and max_trades_per_day > 0):
+    if max_trades_per_day is not None and max_trades_per_day > 0:
         before_n = len(filtered)
         filtered = (
-            filtered.sort_values("_eps", ascending=False)
+            filtered.sort_values("_eps", ascending=False, kind="mergesort")
                     .groupby("Trade Date", as_index=False, group_keys=False)
                     .head(max_trades_per_day)
                     .reset_index(drop=True)
         )
+        filtered.attrs["missing_report"] = missing_report
         if debug:
             print(f"[DEBUG] 日付ごと上位{max_trades_per_day}抽出: {len(filtered)}/{before_n}")
 
@@ -284,35 +177,41 @@ def filter_dataframe(df: pd.DataFrame, *, min_eps: float = 5.0, min_price: float
 
 
 def build_candidates_from_csv(df: pd.DataFrame) -> List[Dict[str, Any]]:
-    """集約 CSV から TradeExecutor 向け candidate dict を生成 (フィルタ後 DF を想定)"""
-    required_cols = {"Trade Date", "Ticker"}
-    if not required_cols.issubset(df.columns):
-        raise ValueError(f"CSV must include columns: {required_cols}")
+    """フィルタ後 DF から TradeExecutor 向け candidate dict を生成する。
+
+    ``percent`` と ``gap`` はパーセントポイント。filter_dataframe が付けた
+    ``_eps`` / ``_gap`` 列が無い場合は、同じ契約で生の列を解析する。
+
+    TradeExecutor はリストの順に資金とマージンを計算するため、候補は
+    Trade Date の昇順に並べる。同じ日の中では入力の順 (EPS 降順) を保つ。
+    """
+    missing = [c for c in ALWAYS_REQUIRED if c not in df.columns]
+    if missing:
+        raise FinvizCsvError(f"CSV must include columns: {missing}")
+
+    ordered = df.assign(_trade_dt=pd.to_datetime(df["Trade Date"]))
+    ordered = ordered.sort_values("_trade_dt", kind="mergesort")
 
     candidates: List[Dict[str, Any]] = []
-    for _, row in df.iterrows():
-        trade_date = str(row["Trade Date"]).split(" ")[0]
+    for _, row in ordered.iterrows():
+        if pd.isna(row["_trade_dt"]) or pd.isna(row["Ticker"]):
+            continue
+        trade_date = row["_trade_dt"].strftime("%Y-%m-%d")
         symbol = str(row["Ticker"]).strip()
         if not symbol:
             continue
-        # EPS Surprise (%). 変換済みの _eps 列があれば優先
-        if "_eps" in row and not pd.isna(row["_eps"]):
-            percent = float(row["_eps"])
-        else:
-            percent = _to_float(row.get("EPS Surprise")) or 0.0
-            if percent < 1:  # Finviz CSV は小数表記(0.12)の場合がある
-                percent *= 100
-        # エントリー価格は TradeExecutor 内で当日の寄付(Open)を使用させる
-        price = None
-        # Gap は Finviz の値をそのまま利用（Open と prevClose の％差）
-        gap = _to_float(row.get("Gap"))
+        percent = row["_eps"] if "_eps" in row else parse_percent(row.get("EPS Surprise"))
+        if pd.isna(percent):
+            raise FinvizCsvError(f"{symbol} {trade_date}: EPS Surprise is missing")
+        gap = row["_gap"] if "_gap" in row else parse_percent(row.get("Gap"))
         candidates.append({
             "code": symbol,
             "trade_date": trade_date,
             "report_date": trade_date,  # 便宜上同じ
-            "price": price,
-            "gap": gap,
-            "percent": percent,
+            "price": None,  # TradeExecutor が当日の寄付 (Open) を使う
+            # 欠損時は None を渡し、TradeExecutor に価格データから計算させる
+            "gap": None if pd.isna(gap) else float(gap),
+            "percent": float(percent),
         })
     return candidates
 
@@ -320,8 +219,16 @@ def build_candidates_from_csv(df: pd.DataFrame) -> List[Dict[str, Any]]:
 # CLI
 # -----------------------------------------------------------------------------
 
+def _optional_float(text: str) -> float | None:
+    """数値、または "none" / "off" (フィルタ無効) を受け付ける。"""
+    if text.strip().lower() in {"none", "off"}:
+        return None
+    return float(text)
+
+
 def parse_args():
-    p = argparse.ArgumentParser(description="Aggregated CSV からバックテストを実行し、フィルタ条件を適用する",
+    p = argparse.ArgumentParser(description="Aggregated CSV からバックテストを実行し、フィルタ条件を適用する。"
+                                "min/max 系の閾値は none で無効にでき、無効なフィルタの列は不要になる",
                                 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("aggregated_csv", type=Path, help="aggregated_screen.csv のパス")
     p.add_argument("--start_date", type=str, required=True, help="バックテスト開始日 (YYYY-MM-DD)")
@@ -329,15 +236,15 @@ def parse_args():
     p.add_argument("--output", type=Path, default=Path("aggregated_backtest_results.json"), help="結果 JSON の出力先")
 
     # フィルタパラメータ (DataFilter 相当)
-    p.add_argument("--min_eps", type=float, default=0, help="最低 EPS サプライズ率 (%)")
-    p.add_argument("--min_price", type=float, default=30.0, help="最低株価 ($)")
-    p.add_argument("--max_gap", type=float, default=10.0, help="最大ギャップ率 (%)")
-    p.add_argument("--min_volume", type=int, default=200, help="最低平均出来高 (千株単位)")
-    p.add_argument("--min_market_cap", type=float, default=5, help="最低時価総額 ($B 単位)")
-    p.add_argument("--position_size", type=float, default=10.0, help="ポジションサイズ (総資産に対する%比率)")
+    p.add_argument("--min_eps", type=_optional_float, default=0, help="最低 EPS サプライズ率 (%%)")
+    p.add_argument("--min_price", type=_optional_float, default=30.0, help="最低株価 ($)")
+    p.add_argument("--max_gap", type=_optional_float, default=10.0, help="最大ギャップ率 (%%)")
+    p.add_argument("--min_volume", type=_optional_float, default=200, help="最低平均出来高 (千株単位)")
+    p.add_argument("--min_market_cap", type=_optional_float, default=5, help="最低時価総額 ($B 単位)")
+    p.add_argument("--position_size", type=float, default=10.0, help="ポジションサイズ (総資産に対する%%比率)")
     p.add_argument("--margin_ratio", type=float, default=1.5, help="最大総ポジション額の倍率制限")
-    p.add_argument("--pre_change", type=float, default=0.0, help="決算前30日間の価格変化率下限 (%)")
-    p.add_argument("--min_perf1h", type=float, default=-10.0, help="Performance (1 Hour) の下限 (%)")
+    p.add_argument("--pre_change", type=_optional_float, default=0.0, help="決算前30日間の価格変化率下限 (%%)")
+    p.add_argument("--min_perf1h", type=_optional_float, default=-10.0, help="Performance (1 Hour) の下限 (%%)")
     p.add_argument("--sp500_only", action="store_true", help="S&P500 採用銘柄のみ対象")
     p.add_argument("--debug", action="store_true", help="フィルタリング過程のデバッグ情報を表示")
     p.add_argument("--max_trades_per_day", type=int, default=5,
@@ -346,18 +253,18 @@ def parse_args():
     # XGBoost分析で重要と判明した追加パラメータ
     p.add_argument("--max_ps_ratio", type=float, default=None, help="最大 P/S 比率")
     p.add_argument("--max_pe_ratio", type=float, default=None, help="最大 P/E 比率")
-    p.add_argument("--min_profit_margin", type=float, default=None, help="最低利益率 (%)")
-    p.add_argument("--min_roa", type=float, default=None, help="最低 ROA (%)")
-    p.add_argument("--max_volatility_week", type=float, default=None, help="最大週次ボラティリティ (%)")
-    p.add_argument("--min_perf_week", type=float, default=None, help="最低週次パフォーマンス (%)")
+    p.add_argument("--min_profit_margin", type=float, default=None, help="最低利益率 (%%)")
+    p.add_argument("--min_roa", type=float, default=None, help="最低 ROA (%%)")
+    p.add_argument("--max_volatility_week", type=float, default=None, help="最大週次ボラティリティ (%%)")
+    p.add_argument("--min_perf_week", type=float, default=None, help="最低週次パフォーマンス (%%)")
     # 追加: 除外用の上限しきい値
-    p.add_argument("--max_perf_week", type=float, default=None, help="最大週次パフォーマンス (%)")
-    p.add_argument("--max_perf_month", type=float, default=None, help="最大月次パフォーマンス (%)")
+    p.add_argument("--max_perf_week", type=float, default=None, help="最大週次パフォーマンス (%%)")
+    p.add_argument("--max_perf_month", type=float, default=None, help="最大月次パフォーマンス (%%)")
     p.add_argument("--max_rsi14", type=float, default=None, help="最大 RSI(14)")
     p.add_argument("--max_pb_ratio", type=float, default=None, help="最大 P/B 比率")
     
     # パフォーマンス改善パラメータ
-    p.add_argument("--stop_loss", type=float, default=6.0, help="ストップロス率 (%)")
+    p.add_argument("--stop_loss", type=float, default=6.0, help="ストップロス率 (%%)")
 
     return p.parse_args()
 
@@ -368,14 +275,28 @@ def parse_args():
 
 def main():
     args = parse_args()
+    try:
+        _run(args)
+    except FinvizCsvError as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _run(args):
+    # バックテスト本体は重い依存 (plotly 等) を持つため、ここで遅延 import する
+    from src.main import EarningsBacktest
+    from src.config import BacktestConfig
+    from src.data_fetcher import DataFetcher
 
     # ---------------------- データ読み込み & フィルタ ----------------------
-    df_raw = pd.read_csv(args.aggregated_csv)
+    df_raw = add_csv_line_numbers(pd.read_csv(args.aggregated_csv))
+    df_raw.columns = df_raw.columns.str.strip()
     print(f"[INFO] 読み込み行数: {len(df_raw)}")
 
     # 日付範囲フィルタ
-    if "Trade Date" not in df_raw.columns:
-        raise ValueError("CSV に 'Trade Date' 列がありません")
+    missing = [c for c in ALWAYS_REQUIRED if c not in df_raw.columns]
+    if missing:
+        raise FinvizCsvError(f"CSV に必須列がありません: {missing}")
     df_raw["Trade Date"] = pd.to_datetime(df_raw["Trade Date"])
     start_dt = pd.to_datetime(args.start_date)
     end_dt   = pd.to_datetime(args.end_date)
@@ -430,12 +351,13 @@ def main():
         start_date=args.start_date,
         end_date=args.end_date,
         target_symbols=symbols,
-        max_gap_percent=args.max_gap,
-        screener_price_min=args.min_price,
-        min_market_cap=args.min_market_cap * 1e9,
+        # 無効 (None) にしたフィルタは、設定の記録上は制限なしとして渡す
+        max_gap_percent=math.inf if args.max_gap is None else args.max_gap,
+        screener_price_min=0.0 if args.min_price is None else args.min_price,
+        min_market_cap=0.0 if args.min_market_cap is None else args.min_market_cap * 1e9,
         position_size=args.position_size,
         margin_ratio=args.margin_ratio,
-        pre_earnings_change=args.pre_change,
+        pre_earnings_change=-math.inf if args.pre_change is None else args.pre_change,
         sp500_only=args.sp500_only,
         stop_loss=args.stop_loss,
     )
