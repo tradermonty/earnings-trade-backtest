@@ -19,6 +19,11 @@ load_dotenv()
 # プロジェクトのルートディレクトリをパスに追加
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src.finviz_csv import (
+    FinvizCsvError,
+    compare_earnings_dates,
+    load_finviz_earnings_dates,
+)
 from src.fmp_data_fetcher import FMPDataFetcher
 
 
@@ -39,74 +44,17 @@ class EarningsDateAccuracyAnalyzer:
         print("FMP Data Fetcher initialized successfully")
 
     def load_finviz_data(self, csv_file_path: str):
-        """Finvizデータの読み込み"""
+        """Finvizデータの読み込み (列契約は docs/finviz_csv_contract.md)"""
         print(f"Loading Finviz data from: {csv_file_path}")
-        
-        try:
-            df = pd.read_csv(csv_file_path)
-            print(f"Loaded {len(df)} records from Finviz")
-            
-            # データの前処理
-            processed_data = []
-            for _, row in df.iterrows():
-                # 決算日の解析
-                earnings_date_raw = row.get('Earnings Date', '')
-                if pd.isna(earnings_date_raw):
-                    continue
-                    
-                earnings_date_str = str(earnings_date_raw).strip()
-                if not earnings_date_str or earnings_date_str == '' or earnings_date_str == 'nan':
-                    continue
-                
-                try:
-                    # 日付フォーマットの解析 (例: "7/1/25 8:30" -> "2025-07-01")
-                    if ' ' in earnings_date_str:
-                        date_part = earnings_date_str.split(' ')[0]
-                    else:
-                        date_part = earnings_date_str
-                    
-                    # MM/DD/YY フォーマットを想定
-                    if '/' in date_part:
-                        parts = date_part.split('/')
-                        if len(parts) == 3:
-                            month, day, year = parts
-                            # 2桁年を4桁に変換
-                            if len(year) == 2:
-                                year = '20' + year
-                            
-                            earnings_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
-                            
-                            # シンボルと会社名も安全に処理
-                            ticker_raw = row.get('Ticker', '')
-                            company_raw = row.get('Company', '')
-                            
-                            symbol = str(ticker_raw).strip() if not pd.isna(ticker_raw) else ''
-                            company = str(company_raw).strip() if not pd.isna(company_raw) else ''
-                            
-                            processed_record = {
-                                'symbol': symbol,
-                                'company': company,
-                                'finviz_date': earnings_date,
-                                'raw_date_str': earnings_date_str
-                            }
-                            
-                            if processed_record['symbol']:
-                                processed_data.append(processed_record)
-                
-                except Exception as e:
-                    print(f"Warning: Could not parse date '{earnings_date_str}' for {row.get('Ticker', 'Unknown')}: {e}")
-                    continue
-            
-            self.finviz_data = processed_data
-            print(f"Successfully processed {len(self.finviz_data)} Finviz earnings records")
-            
-            # 日付範囲の確認
-            dates = [record['finviz_date'] for record in self.finviz_data]
-            print(f"Date range: {min(dates)} to {max(dates)}")
-            
-        except Exception as e:
-            print(f"Error loading Finviz data: {e}")
-            raise
+        df = pd.read_csv(csv_file_path)
+        print(f"Loaded {len(df)} records from Finviz")
+        # 'Ticker' と 'Earnings Date' が無ければ FinvizCsvError で停止する
+        self.finviz_data = load_finviz_earnings_dates(df)
+        print(f"Successfully processed {len(self.finviz_data)} Finviz earnings records")
+        if not self.finviz_data:
+            raise FinvizCsvError("no rows with both Ticker and Earnings Date")
+        dates = [record['finviz_date'] for record in self.finviz_data]
+        print(f"Date range: {min(dates)} to {max(dates)}")
 
     def fetch_fmp_data(self, start_date: str, end_date: str):
         """FMPデータの取得"""
@@ -144,77 +92,8 @@ class EarningsDateAccuracyAnalyzer:
     def compare_dates(self):
         """Finviz vs FMP 決算日比較"""
         print("\nComparing earnings dates between Finviz and FMP...")
-        
-        # FMPデータをsymbolでインデックス化
-        fmp_dict = {}
-        for record in self.fmp_data:
-            symbol = record['symbol']
-            if symbol not in fmp_dict:
-                fmp_dict[symbol] = []
-            fmp_dict[symbol].append(record)
-        
-        comparison_results = []
-        
-        for finviz_record in self.finviz_data:
-            symbol = finviz_record['symbol']
-            finviz_date = finviz_record['finviz_date']
-            
-            result = {
-                'symbol': symbol,
-                'company': finviz_record['company'],
-                'finviz_date': finviz_date,
-                'finviz_raw': finviz_record['raw_date_str'],
-                'fmp_date': None,
-                'fmp_time': None,
-                'date_match': False,
-                'date_diff_days': None,
-                'status': 'NO_FMP_DATA'
-            }
-            
-            if symbol in fmp_dict:
-                # 同じ銘柄のFMPデータを検索
-                fmp_records = fmp_dict[symbol]
-                
-                # 最も近い日付を探す
-                best_match = None
-                min_diff = float('inf')
-                
-                for fmp_record in fmp_records:
-                    fmp_date = fmp_record['fmp_date']
-                    
-                    try:
-                        finviz_dt = datetime.strptime(finviz_date, '%Y-%m-%d')
-                        fmp_dt = datetime.strptime(fmp_date, '%Y-%m-%d')
-                        
-                        diff_days = abs((finviz_dt - fmp_dt).days)
-                        
-                        if diff_days < min_diff:
-                            min_diff = diff_days
-                            best_match = fmp_record
-                    
-                    except ValueError as e:
-                        print(f"Date parsing error for {symbol}: {e}")
-                        continue
-                
-                if best_match:
-                    result['fmp_date'] = best_match['fmp_date']
-                    result['fmp_time'] = best_match['time']
-                    result['date_diff_days'] = min_diff
-                    result['date_match'] = (min_diff == 0)
-                    
-                    if min_diff == 0:
-                        result['status'] = 'EXACT_MATCH'
-                    elif min_diff <= 1:
-                        result['status'] = 'CLOSE_MATCH'
-                    elif min_diff <= 3:
-                        result['status'] = 'MODERATE_DIFF'
-                    else:
-                        result['status'] = 'LARGE_DIFF'
-            
-            comparison_results.append(result)
-        
-        self.comparison_results = comparison_results
-        print(f"Completed comparison for {len(comparison_results)} records")
+        self.comparison_results = compare_earnings_dates(self.finviz_data, self.fmp_data)
+        print(f"Completed comparison for {len(self.comparison_results)} records")
 
     def generate_accuracy_report(self):
         """精度分析レポートの生成"""
